@@ -122,6 +122,10 @@ static int setup_srv(struct io_uring *ring, struct sockaddr_in *server_addr)
 	io_uring_for_each_cqe(ring, head, cqe) {
 		ret = cqe->res;
 		if (ret < 0) {
+			if (head == 1 && ret == -EOPNOTSUPP) {
+				fprintf(stderr, "setsockopt via io_uring not supported, skipping test\n");
+				return T_EXIT_SKIP;
+			}
 			fprintf(stderr, "Server startup failed. step %d got %d \n", head, ret);
 			return T_EXIT_FAIL;
 		}
