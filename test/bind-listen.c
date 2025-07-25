@@ -378,10 +378,10 @@ int main(int argc, char *argv[])
 		return T_EXIT_SKIP;
 	}
 	if (io_uring_opcode_supported(probe, IORING_OP_URING_CMD)) {
-		fprintf("DEBUG: IORING_OP_URING_CMD supported\n");
+		printf("DEBUG: IORING_OP_URING_CMD supported\n");
 	}
 	if (!io_uring_opcode_supported(probe, IORING_OP_LISTEN)) {
-		fprintf("DEBUG: IORING_OP_LISTEN supported\n");
+		printf("DEBUG: IORING_OP_LISTEN supported\n");
 	}
 
 
