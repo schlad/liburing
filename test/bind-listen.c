@@ -123,7 +123,7 @@ static int setup_srv(struct io_uring *ring, struct sockaddr_in *server_addr)
 		ret = cqe->res;
 		if (ret == -EOPNOTSUPP) {
 			fprintf(stderr, "EOPNOTSUPP returned during the server startup. step %d got %d \n", head, ret);
-			return T_EXIT_SKIP;
+			goto skip;
 		} else if (ret < 0) {
 			fprintf(stderr, "Server startup failed. step %d got %d \n", head, ret);
 			return T_EXIT_FAIL;
@@ -131,6 +131,10 @@ static int setup_srv(struct io_uring *ring, struct sockaddr_in *server_addr)
 	} io_uring_cq_advance(ring, submitted);
 
 	return T_SETUP_OK;
+
+skip:
+	io_uring_queue_exit(&ring);
+    return T_SETUP_SKIP;
 }
 
 static int test_good_server(unsigned int ring_flags)
