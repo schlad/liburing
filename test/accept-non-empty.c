@@ -53,7 +53,7 @@ static int start_accept_listen(int port_off, int extra_flags)
 
 	ret = bind(fd, (struct sockaddr *) &addr, sizeof(addr));
 	assert(ret != -1);
-	ret = listen(fd, 20000);
+	ret = listen(fd, 40000);
 	assert(ret != -1);
 
 	return fd;
@@ -66,7 +66,7 @@ static void *connect_fn(void *data)
 	int i;
 
 	pthread_barrier_wait(&d->barrier);
-
+	usleep(10000);
 	addr.sin_family = AF_INET;
 	addr.sin_port = htons(0x1235);
 	addr.sin_addr.s_addr = inet_addr("127.0.0.1");
@@ -82,6 +82,8 @@ static void *connect_fn(void *data)
 		if (connect(s, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
 			perror("connect");
 			break;
+		} else {
+			printf("connect %d success: fd=%d\n", i, s);
 		}
 	}
 
@@ -121,6 +123,12 @@ static int test_maccept(struct data *d, int flags, int fixed)
 		return 0;
 	}
 
+	printf("Feature bits: 0x%x\n", p.features);
+		if (p.features & IORING_FEAT_RECVSEND_BUNDLE)
+    printf("Kernel supports IORING_FEAT_RECVSEND_BUNDLE\n");
+		else
+	printf("Kernel does NOT support IORING_FEAT_RECVSEND_BUNDLE\n");
+
 	setup_thread(d, MAX_ACCEPTS);
 
 	fds = malloc(MAX_ACCEPTS * sizeof(int));
@@ -156,9 +164,10 @@ static int test_maccept(struct data *d, int flags, int fixed)
 		ret = io_uring_wait_cqe(&ring, &cqe);
 		assert(!ret);
 		if (cqe->res < 0) {
-			fprintf(stderr, "res=%d\n", cqe->res);
+			fprintf(stderr, "accept cqe failed: res=%d flags=%x\n", cqe->res, cqe->flags);
 			break;
 		}
+		printf("DEBUG: Accept %d: fd=%d, CQE flags=0x%x\n", i, cqe->res, cqe->flags);
 		fds[i] = cqe->res;
 		if (d->connects == 1) {
 			if (cqe->flags & IORING_CQE_F_SOCK_NONEMPTY) {
@@ -174,6 +183,8 @@ static int test_maccept(struct data *d, int flags, int fixed)
 				err = 1;
 				break;
 			} else if (!last && !(cqe->flags & IORING_CQE_F_SOCK_NONEMPTY)) {
+				fprintf(stderr, "FAIL: i=%d, last=%d, flags=0x%x, connects=%d\n",
+					i, last, cqe->flags, d->connects);
 				fprintf(stderr, "Empty on multi connect?\n");
 				err = 1;
 				break;
