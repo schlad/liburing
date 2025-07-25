@@ -380,7 +380,7 @@ int main(int argc, char *argv[])
 	if (io_uring_opcode_supported(probe, IORING_OP_URING_CMD)) {
 		printf("DEBUG: IORING_OP_URING_CMD supported\n");
 	}
-	if (!io_uring_opcode_supported(probe, IORING_OP_LISTEN)) {
+	if (io_uring_opcode_supported(probe, IORING_OP_LISTEN)) {
 		printf("DEBUG: IORING_OP_LISTEN supported\n");
 	}
 
