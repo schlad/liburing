@@ -377,6 +377,13 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "IORING_OP_URING_CMD not supported, skipping\n");
 		return T_EXIT_SKIP;
 	}
+	if (io_uring_opcode_supported(probe, IORING_OP_URING_CMD)) {
+		fprintf("DEBUG: IORING_OP_URING_CMD supported\n");
+	}
+	if (!io_uring_opcode_supported(probe, IORING_OP_LISTEN)) {
+		fprintf("DEBUG: IORING_OP_LISTEN supported\n");
+	}
+
 
 	ret = test_good_server(0);
 	if (ret) {
