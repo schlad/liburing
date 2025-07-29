@@ -11,6 +11,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <pthread.h>
+#include <liburing/io_uring.h>
 
 #define MSG_SIZE 128
 #define NR_MIN_MSGS	4
@@ -209,7 +210,7 @@ static int do_recv(struct io_uring *ring, struct recv_data *rd)
 			fprintf(stderr, "no buffer set in recv\n");
 			goto err;
 		}
-		bid = cqe->flags >> IORING_CQE_BUFFER_SHIFT;
+		bid = io_uring_cqe_get_buffer(cqe);
 		if (bid != next_bid) {
 			fprintf(stderr, "got bid %d, wanted %d\n", bid, next_bid);
 			goto err;
