@@ -121,13 +121,20 @@ static int setup_srv(struct io_uring *ring, struct sockaddr_in *server_addr)
 
 	io_uring_for_each_cqe(ring, head, cqe) {
 		ret = cqe->res;
-		if (ret < 0) {
+		if (ret == -EOPNOTSUPP) {
+			fprintf(stderr, "EOPNOTSUPP returned during the server startup. step %d got %d \n", head, ret);
+			goto skip;
+		} else if (ret < 0) {
 			fprintf(stderr, "Server startup failed. step %d got %d \n", head, ret);
 			return T_EXIT_FAIL;
 		}
 	} io_uring_cq_advance(ring, submitted);
 
 	return T_SETUP_OK;
+
+skip:
+	io_uring_queue_exit(&ring);
+    return T_SETUP_SKIP;
 }
 
 static int test_good_server(unsigned int ring_flags)
@@ -373,6 +380,20 @@ int main(int argc, char *argv[])
 		return T_EXIT_SKIP;
 	if (!io_uring_opcode_supported(probe, IORING_OP_LISTEN))
 		return T_EXIT_SKIP;
+	if (!io_uring_opcode_supported(probe, IORING_OP_URING_CMD)) {
+		fprintf(stderr, "IORING_OP_URING_CMD not supported, skipping\n");
+		return T_EXIT_SKIP;
+	}
+	if (io_uring_opcode_supported(probe, IORING_OP_URING_CMD)) {
+		printf("DEBUG: IORING_OP_URING_CMD supported\n");
+	}
+	if (io_uring_opcode_supported(probe, IORING_OP_LISTEN)) {
+		printf("DEBUG: IORING_OP_LISTEN supported\n");
+	}
+	if (!io_uring_opcode_supported(probe, IORING_OP_URING_CMD)) {
+		fprintf(stderr, "IORING_OP_URING_CMD not supported, skipping\n");
+		return T_EXIT_SKIP;
+	}
 
 	ret = test_good_server(0);
 	if (ret) {
