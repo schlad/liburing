@@ -1077,64 +1077,85 @@ static void debug_ring_features(const struct io_uring_params *p)
 #endif
 }
 
-static int test_update_multishot_timeouts_4(struct io_uring *ring, unsigned long ms)
+static int test_update_multishot_timeouts(struct io_uring *ring, unsigned long ms)
 {
     struct io_uring_sqe *sqe;
     struct io_uring_cqe *cqe;
     struct __kernel_timespec ts, ts_upd;
-    unsigned long long exp_ms, base_ms = 10000;
-    struct timeval tv[4]; // for 4 timers
-    int ret, i, nr = 12;   // 4 timeouts + 4 updates + 4 expirations
+    unsigned long long exp_ms[4];
+    struct timeval tv[4];
+    unsigned long long base_ms = 10000;
+    int ret, i, nr = 12; /* 4 timeouts + 4 updates + 4 expirations */
     __u32 mode = 0;
 
-    fprintf(stderr, "[TEST] Arming 4 multishot timeouts (base %llums, update to %lums)\n",
-            base_ms, ms);
+    if (no_multishot)
+        return T_EXIT_SKIP;
 
     msec_to_ts(&ts, base_ms);
     msec_to_ts(&ts_upd, ms);
+
     for (i = 0; i < 4; i++)
         gettimeofday(&tv[i], NULL);
 
-    // --- Arm 4 timers ---
+    /* ---- Arm 4 multishot timeouts ---- */
     for (i = 0; i < 4; i++) {
         sqe = io_uring_get_sqe(ring);
+        if (!sqe) {
+            fprintf(stderr, "%s: get sqe failed\n", __FUNCTION__);
+            goto err;
+        }
         io_uring_prep_timeout(sqe, &ts, 0, IORING_TIMEOUT_MULTISHOT);
-        sqe->user_data = 1 + i; // timers: 1, 2, 3, 4
+        sqe->user_data = i + 1;
     }
 
-    // --- Updates ---
+    /* ---- Prepare updates for each ---- */
     for (i = 0; i < 4; i++) {
         sqe = io_uring_get_sqe(ring);
-        io_uring_prep_timeout_update(sqe, &ts_upd, 1 + i, mode);
-        sqe->user_data = 101 + i; // updates: 101..104
+        if (!sqe) {
+            fprintf(stderr, "%s: get sqe failed\n", __FUNCTION__);
+            goto err;
+        }
+        io_uring_prep_timeout_update(sqe, &ts_upd, i + 1, mode);
+        sqe->user_data = 100 + (i + 1);
     }
 
     ret = io_uring_submit(ring);
     if (ret < 0) {
-        fprintf(stderr, "%s: submit failed %d\n", __FUNCTION__, ret);
-        return 1;
+        fprintf(stderr, "%s: sqe submit failed: %d\n", __FUNCTION__, ret);
+        goto err;
     }
 
-    // --- Completion loop ---
-    int timeouts_seen[4] = {0};
+    /* ---- Process completions ---- */
     for (i = 0; i < nr; i++) {
         ret = io_uring_wait_cqe(ring, &cqe);
-        if (ret < 0)
+        if (ret < 0) {
+            fprintf(stderr, "%s: wait completion %d\n", __FUNCTION__, ret);
             goto err;
+        }
 
-        unsigned long long ud = (unsigned long long)cqe->user_data;
-        fprintf(stderr, "[DEBUG] CQE: user_data=%llu, res=%d\n", ud, cqe->res);
-
-        if (ud >= 1 && ud <= 4) { // timeout CQE
-            int idx = ud - 1;
-            exp_ms = mtime_since_now(&tv[idx]);
-            fprintf(stderr, "   [T%u] expired_after %llums (expected ~%lums)\n",
-                    (unsigned)ud, exp_ms, ms);
+        if (cqe->user_data >= 1 && cqe->user_data <= 4) {
+            /* Timeout expiration */
+            if (cqe->res != -ETIME) {
+                fprintf(stderr, "%s: got %d, wanted %d for timer %llu\n",
+                        __FUNCTION__, cqe->res, -ETIME,
+                        (unsigned long long)cqe->user_data);
+                goto err;
+            }
+            int idx = cqe->user_data - 1;
+            exp_ms[idx] = mtime_since_now(&tv[idx]);
+            fprintf(stderr, "[DEBUG] Timer #%d expired after %llums (expected ~%lums)\n",
+                    idx + 1, exp_ms[idx], ms);
+            if (exp_ms[idx] > 1.05 * ms) {
+                fprintf(stderr, "too long, timeout wasn't updated (#%d expired after %llu instead of %lu)\n",
+                        idx + 1, exp_ms[idx], ms);
+                goto err;
+            }
             gettimeofday(&tv[idx], NULL);
-            timeouts_seen[idx]++;
-        } else if (ud >= 101 && ud <= 104) { // update CQE
+        } else if (cqe->user_data >= 101 && cqe->user_data <= 104) {
+            /* Update confirmation */
             if (cqe->res != 0) {
-                fprintf(stderr, "   [U%u] update failed res=%d\n", (unsigned)ud - 100, cqe->res);
+                fprintf(stderr, "%s: update got %d, wanted 0\n",
+                        __FUNCTION__, cqe->res);
                 goto err;
             }
         }
@@ -1142,31 +1163,35 @@ static int test_update_multishot_timeouts_4(struct io_uring *ring, unsigned long
         io_uring_cqe_seen(ring, cqe);
     }
 
-    fprintf(stderr, "[TEST] Removing timeouts\n");
+    /* ---- Remove all 4 timers ---- */
     for (i = 0; i < 4; i++) {
         sqe = io_uring_get_sqe(ring);
-        io_uring_prep_timeout_remove(sqe, 1 + i, 0);
+        if (!sqe) {
+            fprintf(stderr, "%s: get sqe failed\n", __FUNCTION__);
+            goto err;
+        }
+        io_uring_prep_timeout_remove(sqe, i + 1, 0);
     }
 
     ret = io_uring_submit(ring);
-    if (ret != 4)
+    if (ret != 4) {
+        fprintf(stderr, "%s: sqe submit failed: %d\n", __FUNCTION__, ret);
         goto err;
+    }
 
     for (i = 0; i < 4; i++) {
         ret = io_uring_wait_cqe(ring, &cqe);
-        if (ret < 0)
+        if (ret < 0) {
+            fprintf(stderr, "%s: wait completion %d\n", __FUNCTION__, ret);
             goto err;
+        }
         io_uring_cqe_seen(ring, cqe);
     }
 
-    fprintf(stderr, "[TEST] Multishot timeout update (4 timers) DONE\n");
     return 0;
-
 err:
-    fprintf(stderr, "[TEST] FAILED in 4‑timer multishot timeout test\n");
     return 1;
 }
-
 
 static int test_update_nonexistent_timeout(struct io_uring *ring)
 {
