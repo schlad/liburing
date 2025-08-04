@@ -955,7 +955,7 @@ static int test_update_timeout(struct io_uring *ring, unsigned long ms,
 	struct io_uring_sqe *sqe;
 	struct io_uring_cqe *cqe;
 	struct __kernel_timespec ts, ts_upd;
-	unsigned long long exp_ms, base_ms = 10000;
+	unsigned long long exp_ms, base_ms = 2000;
 	bool update_ealready = false;
 	struct timeval tv;
 	int ret, i, nr = 2;
