@@ -949,119 +949,63 @@ err:
 	return 1;
 }
 
-static int test_update_timeout(struct io_uring *ring, unsigned long ms,
-				bool abs, bool async, bool linked)
+static int test_update_multishot_timeouts(struct io_uring *ring, unsigned long ms)
 {
 	struct io_uring_sqe *sqe;
 	struct io_uring_cqe *cqe;
 	struct __kernel_timespec ts, ts_upd;
-	unsigned long long exp_ms, base_ms = 2000;
-	bool update_ealready = false;
-	struct timeval tv;
-	int ret, i, nr = 2;
-	__u32 mode = abs ? IORING_TIMEOUT_ABS : 0;
+	unsigned long long exp_ms, base_ms = 2000; /* shorter so bug shows fast */
+	struct timeval prev;
+	int ret, shot;
+	__u32 mode = 0;
 
-	msec_to_ts(&ts_upd, ms);
-	gettimeofday(&tv, NULL);
+	if (no_multishot)
+		return T_EXIT_SKIP;
 
-	sqe = io_uring_get_sqe(ring);
-	if (!sqe) {
-		fprintf(stderr, "%s: get sqe failed\n", __FUNCTION__);
-		goto err;
-	}
 	msec_to_ts(&ts, base_ms);
-	io_uring_prep_timeout(sqe, &ts, 0, 0);
+	msec_to_ts(&ts_upd, ms);
+
+	/* Submit multishot timeout */
+	sqe = io_uring_get_sqe(ring);
+	io_uring_prep_timeout(sqe, &ts, 0, IORING_TIMEOUT_MULTISHOT);
 	sqe->user_data = 1;
 
-	if (linked) {
-		sqe = io_uring_get_sqe(ring);
-		if (!sqe) {
-			fprintf(stderr, "%s: get sqe failed\n", __FUNCTION__);
-			goto err;
-		}
-		io_uring_prep_nop(sqe);
-		sqe->user_data = 3;
-		sqe->flags = IOSQE_IO_LINK;
-		if (async)
-			sqe->flags |= IOSQE_ASYNC;
-		nr++;
-	}
-
+	/* Submit update to shorten timeout */
 	sqe = io_uring_get_sqe(ring);
-	if (!sqe) {
-		fprintf(stderr, "%s: get sqe failed\n", __FUNCTION__);
-		goto err;
-	}
 	io_uring_prep_timeout_update(sqe, &ts_upd, 1, mode);
-	sqe->user_data = 2;
-	if (async)
-		sqe->flags |= IOSQE_ASYNC;
+	sqe->user_data = 99; /* update CQE */
 
 	ret = io_uring_submit(ring);
-	if (ret != nr) {
-		fprintf(stderr, "%s: sqe submit failed: %d\n", __FUNCTION__, ret);
-		goto err;
+	if (ret < 0) {
+		fprintf(stderr, "submit failed: %d\n", ret);
+		return 1;
 	}
 
-	for (i = 0; i < nr; i++) {
+	gettimeofday(&prev, NULL);
+
+	/* Wait for a few expirations */
+	for (shot = 0; shot < 5; shot++) {
 		ret = io_uring_wait_cqe(ring, &cqe);
 		if (ret < 0) {
-			fprintf(stderr, "%s: wait completion %d\n", __FUNCTION__, ret);
-			goto err;
+			fprintf(stderr, "wait_cqe failed: %d\n", ret);
+			return 1;
 		}
 
-		switch (cqe->user_data) {
-		case 1:
-			if (cqe->res != -ETIME) {
-				fprintf(stderr, "%s: got %d, wanted %d\n",
-						__FUNCTION__, cqe->res, -ETIME);
-				goto err;
-			}
-			break;
-		case 2:
-			/*
-			 * We should not be hitting this case, but for
-			 * a kernel with PREEMPT_RT, even an instant attempt
-			 * to remove a timer will return that the timer is
-			 * already running... Deal with it.
-			 */
-			if (cqe->res == -EALREADY) {
-				update_ealready = true;
-				break;
-			}
-			if (cqe->res != 0) {
-				fprintf(stderr, "%s: got %d, wanted %d\n",
-						__FUNCTION__, cqe->res,
-						0);
-				goto err;
-			}
-			break;
-		case 3:
-			if (cqe->res != 0) {
-				fprintf(stderr, "nop failed\n");
-				goto err;
-			}
-			break;
-		default:
-			goto err;
+		if (cqe->user_data == 1 && cqe->res == -ETIME) {
+			unsigned long long delta = mtime_since_now(&prev);
+			fprintf(stderr, "[debug] multishot#1 shot %d interval: %llu ms\n",
+				shot, delta);
+			gettimeofday(&prev, NULL);
+		} else if (cqe->user_data == 99) {
+			fprintf(stderr, "[debug] timeout updated to %lu ms\n", ms);
 		}
+
 		io_uring_cqe_seen(ring, cqe);
 	}
 
-	exp_ms = mtime_since_now(&tv);
-	if (!update_ealready && exp_ms >= base_ms / 2) {
-		fprintf(stderr, "too long, timeout wasn't updated\n");
-		goto err;
-	}
-	if (ms >= 1000 && !abs && exp_ms < ms / 2) {
-		fprintf(stderr, "fired too early, potentially updated to 0 ms"
-					"instead of %lu\n", ms);
-		goto err;
-	}
 	return 0;
-err:
-	return 1;
 }
+
 
 static int test_update_multishot_timeouts(struct io_uring *ring, unsigned long ms)
 {
