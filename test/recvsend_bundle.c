@@ -195,8 +195,11 @@ static int do_recv(struct io_uring *ring, struct recv_data *rd)
 	verify_ptr = malloc(rd->recv_bytes);
 
 	do {
-		if (recv_get_cqe(ring, rd, &cqe))
+		fprintf(stderr, "[DEBUG] Waiting for recv CQE...\n");
+		if (recv_get_cqe(ring, rd, &cqe)) {
+			fprintf(stderr, "[DEBUG] recv_get_cqe() returned failure\n");
 			break;
+		}
 		if (cqe->res == -EINVAL) {
 			fprintf(stdout, "recv not supported, skipping\n");
 			return 0;
@@ -305,6 +308,7 @@ static void *recv_fn(void *data)
        buf, (size_t)MSG_SIZE * RECV_BIDS, RECV_BIDS, MSG_SIZE);
 
 	if (!classic_buffers) {
+		fprintf(stderr, "[DEBUG] Using buffer ring path\n");
 		br = io_uring_setup_buf_ring(&ring, RECV_BIDS, RECV_BGID, 0, &ret);
 		if (!br) {
 			if (ret != -EINVAL)
@@ -320,6 +324,7 @@ static void *recv_fn(void *data)
 		io_uring_buf_ring_advance(br, RECV_BIDS);
 		rd->recv_buf = buf;
 	} else {
+		fprintf(stderr, "[DEBUG] Using classic provide_buffers path\n");
 		ret = provide_classic_buffers(&ring, buf, RECV_BIDS, RECV_BGID);
 		if (ret) {
 			fprintf(stderr, "failed providing classic buffers\n");
@@ -467,6 +472,7 @@ static int do_send(struct recv_data *rd)
 		return 1;
 
 	if (!classic_buffers) {
+		fprintf(stderr, "[DEBUG] SEND: Using buffer ring path\n");
 		br = io_uring_setup_buf_ring(&ring, nr_msgs, SEND_BGID, 0, &ret);
 		if (!br) {
 			if (ret == -EINVAL) {
@@ -484,6 +490,7 @@ static int do_send(struct recv_data *rd)
 		}
 		io_uring_buf_ring_advance(br, nr_msgs);
 	} else {
+		fprintf(stderr, "[DEBUG] SEND: Using classic provide_buffers path\n");
 		ret = provide_classic_buffers(&ring, buf, nr_msgs, SEND_BGID);
 		if (ret) {
 			fprintf(stderr, "failed providing classic buffers\n");
@@ -587,8 +594,10 @@ static int test(int backlog, unsigned int max_sends, int *to_eagain,
 	void *retval;
 
 	/* backlog not reliable on UDP, skip it */
-	if ((backlog || max_sends) && !use_tcp)
+	if ((backlog || max_sends) && !use_tcp) {
+		printf("[DEBUG] Skipping test because UDP + backlog/max_sends\n");
 		return T_EXIT_PASS;
+	}
 
 	memset(&rd, 0, sizeof(rd));
 	pthread_barrier_init(&rd.connect, NULL, 2);
@@ -602,13 +611,16 @@ static int test(int backlog, unsigned int max_sends, int *to_eagain,
 	rd.send_bundle = send_bundle;
 	rd.recv_bundle = recv_bundle;
 
+	printf("[DEBUG] Creating recv thread...\n");
 	ret = pthread_create(&recv_thread, NULL, recv_fn, &rd);
 	if (ret) {
 		fprintf(stderr, "Thread create failed: %d\n", ret);
 		return 1;
 	}
 
+	printf("[DEBUG] Calling do_send()...\n");
 	ret = do_send(&rd);
+	printf("[DEBUG] do_send() returned %d\n", ret);
 	if (no_send_mshot) {
 		fprintf(stderr, "no_send_mshot, aborting (ignore other errors)\n");
 		rd.abort = 1;
@@ -622,6 +634,7 @@ static int test(int backlog, unsigned int max_sends, int *to_eagain,
 	pthread_join(recv_thread, &retval);
 	if (to_eagain)
 		*to_eagain = rd.to_eagain;
+	printf("[DEBUG] test() end, retval=%ld\n", (intptr_t)retval);
 	return (intptr_t)retval;
 }
 
