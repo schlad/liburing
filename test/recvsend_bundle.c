@@ -314,7 +314,6 @@ static void *recv_fn(void *data)
 		fprintf(stderr, "\n[PATH] Using **BUFFER RING** path for RECV (group=%d)\n", RECV_BGID);
 		br = io_uring_setup_buf_ring(&ring, RECV_BIDS, RECV_BGID, 0, &ret);
 		fprintf(stderr, "[DEBUG] io_uring_setup_buf_ring(RECV) returned %p (ret=%d)\n", br, ret);
-        RECV_BGID, br, ret);
 		if (!br) {
 			if (ret != -EINVAL)
 				fprintf(stderr, "failed setting up recv ring %d\n", ret);
