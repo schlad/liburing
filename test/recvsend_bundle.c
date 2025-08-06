@@ -68,6 +68,8 @@ static int arm_recv(struct io_uring *ring, struct recv_data *rd)
 	sqe->user_data = 2;
 
 	ret = io_uring_submit(ring);
+	fprintf(stderr, "[DEBUG] arm_recv submit ret=%d (fd=%d, buf_group=%u)\n",
+        ret, rd->accept_fd, RECV_BGID);
 	if (ret != 1) {
 		fprintf(stderr, "submit failed: %d\n", ret);
 		return 1;
@@ -311,6 +313,8 @@ static void *recv_fn(void *data)
 	if (!classic_buffers) {
 		fprintf(stderr, "[DEBUG] Using buffer ring path\n");
 		br = io_uring_setup_buf_ring(&ring, RECV_BIDS, RECV_BGID, 0, &ret);
+		fprintf(stderr, "[DEBUG] recv buffer group %d setup result: %p (ret=%d)\n",
+        RECV_BGID, br, ret);
 		if (!br) {
 			if (ret != -EINVAL)
 				fprintf(stderr, "failed setting up recv ring %d\n", ret);
