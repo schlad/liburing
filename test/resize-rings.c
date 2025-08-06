@@ -544,79 +544,98 @@ static int test_mmap_race(struct io_uring *ring, struct io_uring_params *__p)
 
 static int test(int flags, int fd, int async)
 {
-	struct io_uring_params p = {
-		.flags = flags,
-	};
-	struct io_uring ring;
-	int ret;
+    struct io_uring_params p = {
+        .flags = flags,
+    };
+    struct io_uring ring;
+    int ret;
 
-	if (no_defer)
-		return T_EXIT_SKIP;
-	if (!(flags & IORING_SETUP_DEFER_TASKRUN) && only_defer)
-		return T_EXIT_SKIP;
+    printf("\n[TEST] Starting test(flags=0x%x, fd=%d, async=%d)\n", flags, fd, async);
 
-	ret = io_uring_queue_init_params(8, &ring, &p);
-	if (ret < 0) {
-		fprintf(stderr, "ring setup failed: %d\n", ret);
-		return T_EXIT_FAIL;
-	}
+    if (no_defer) {
+        printf("[SKIP] no_defer is set\n");
+        return T_EXIT_SKIP;
+    }
+    if (!(flags & IORING_SETUP_DEFER_TASKRUN) && only_defer) {
+        printf("[SKIP] only_defer is set and DEFER_TASKRUN not in flags\n");
+        return T_EXIT_SKIP;
+    }
 
-	ret = test_basic(&ring, async);
-	if (ret == T_EXIT_SKIP) {
-		if (!(flags & IORING_SETUP_DEFER_TASKRUN)) {
-			io_uring_queue_exit(&ring);
-			only_defer = true;
-		} else {
-			no_defer = true;
-		}
-		return T_EXIT_SKIP;
-	} else if (ret == T_EXIT_FAIL) {
-		fprintf(stderr, "test_basic %x failed\n", flags);
-		return T_EXIT_FAIL;
-	}
+    printf("[STEP 1] io_uring_queue_init_params(entries=8)\n");
+    ret = io_uring_queue_init_params(8, &ring, &p);
+    if (ret < 0) {
+        fprintf(stderr, "[ERROR] ring setup failed: %d\n", ret);
+        return T_EXIT_FAIL;
+    }
 
-	ret = test_reads(&ring, fd, async);
-	if (ret == T_EXIT_FAIL) {
-		fprintf(stderr, "test_reads %x failed\n", flags);
-		return T_EXIT_FAIL;
-	}
+    printf("[STEP 2] test_basic()\n");
+    ret = test_basic(&ring, async);
+    if (ret == T_EXIT_SKIP) {
+        printf("[NOTE] test_basic returned SKIP\n");
+        if (!(flags & IORING_SETUP_DEFER_TASKRUN)) {
+            io_uring_queue_exit(&ring);
+            only_defer = true;
+        } else {
+            no_defer = true;
+        }
+        return T_EXIT_SKIP;
+    } else if (ret == T_EXIT_FAIL) {
+        fprintf(stderr, "[ERROR] test_basic 0x%x failed\n", flags);
+        return T_EXIT_FAIL;
+    }
 
-	ret = test_pipes(&ring, async);
-	if (ret == T_EXIT_FAIL) {
-		fprintf(stderr, "test_pipes %x failed\n", flags);
-		return T_EXIT_FAIL;
-	}
+    printf("[STEP 3] test_reads()\n");
+    ret = test_reads(&ring, fd, async);
+    if (ret == T_EXIT_FAIL) {
+        fprintf(stderr, "[ERROR] test_reads 0x%x failed\n", flags);
+        return T_EXIT_FAIL;
+    }
 
-	if (async)
-		return T_EXIT_PASS;
+    printf("[STEP 4] test_pipes()\n");
+    ret = test_pipes(&ring, async);
+    if (ret == T_EXIT_FAIL) {
+        fprintf(stderr, "[ERROR] test_pipes 0x%x failed\n", flags);
+        return T_EXIT_FAIL;
+    }
 
-	ret = test_all_copy(&ring);
-	if (ret == T_EXIT_FAIL) {
-		fprintf(stderr, "test_all_copy %x failed\n", flags);
-		return T_EXIT_FAIL;
-	}
+    if (async) {
+        printf("[INFO] async mode → skipping remaining tests\n");
+        return T_EXIT_PASS;
+    }
 
-	ret = test_overflow(&ring);
-	if (ret == T_EXIT_FAIL) {
-		fprintf(stderr, "test_overflow %x failed\n", flags);
-		return T_EXIT_FAIL;
-	}
+    printf("[STEP 5] test_all_copy()\n");
+    ret = test_all_copy(&ring);
+    if (ret == T_EXIT_FAIL) {
+        fprintf(stderr, "[ERROR] test_all_copy 0x%x failed\n", flags);
+        return T_EXIT_FAIL;
+    }
 
-	ret = test_same_resize(flags);
-	if (ret == T_EXIT_FAIL) {
-		fprintf(stderr, "test_same_resize %x failed\n", flags);
-		return T_EXIT_FAIL;
-	}
+    printf("[STEP 6] test_overflow()\n");
+    ret = test_overflow(&ring);
+    if (ret == T_EXIT_FAIL) {
+        fprintf(stderr, "[ERROR] test_overflow 0x%x failed\n", flags);
+        return T_EXIT_FAIL;
+    }
 
-	/* must go at the end, insert more tests above this one */
-	ret = test_mmap_race(&ring, &p);
-	if (ret == T_EXIT_FAIL) {
-		fprintf(stderr, "test_mmap_race %x failed\n", flags);
-		return T_EXIT_FAIL;
-	}
+    printf("[STEP 7] test_same_resize()\n");
+    ret = test_same_resize(flags);
+    if (ret == T_EXIT_FAIL) {
+        fprintf(stderr, "[ERROR] test_same_resize 0x%x failed\n", flags);
+        return T_EXIT_FAIL;
+    }
 
-	io_uring_queue_exit(&ring);
-	return T_EXIT_PASS;
+    printf("[STEP 8] test_mmap_race()\n");
+    ret = test_mmap_race(&ring, &p);
+    if (ret == T_EXIT_FAIL) {
+        fprintf(stderr, "[ERROR] test_mmap_race 0x%x failed\n", flags);
+        return T_EXIT_FAIL;
+    }
+
+    printf("[STEP 9] io_uring_queue_exit()\n");
+    io_uring_queue_exit(&ring);
+
+    printf("[DONE] test(flags=0x%x, fd=%d, async=%d) → PASS\n\n", flags, fd, async);
+    return T_EXIT_PASS;
 }
 
 int main(int argc, char *argv[])
