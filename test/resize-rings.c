@@ -640,37 +640,74 @@ static int test(int flags, int fd, int async)
 
 int main(int argc, char *argv[])
 {
-	int ret, fd = -1;
+    int ret, fd = -1;
 
-	if (argc > 1)
-		fd = open("/dev/nvme0n1", O_RDONLY | O_DIRECT);
+    printf("[MAIN] Starting liburing resize ring tests\n");
 
-	ret = test(0, fd, 0);
-	if (ret == T_EXIT_SKIP)
-		goto try_defer;
-	else if (ret == T_EXIT_FAIL)
-		return T_EXIT_FAIL;
+    if (argc > 1) {
+        printf("[MAIN] Opening /dev/nvme0n1 for direct I/O...\n");
+        fd = open("/dev/nvme0n1", O_RDONLY | O_DIRECT);
+        if (fd < 0) {
+            perror("[ERROR] open /dev/nvme0n1");
+        } else {
+            printf("[MAIN] NVMe device opened (fd=%d)\n", fd);
+        }
+    } else {
+        printf("[MAIN] No NVMe device argument given, skipping NVMe open\n");
+    }
 
-	ret = test(0, fd, 1);
-	if (ret == T_EXIT_FAIL)
-		return T_EXIT_FAIL;
+    printf("[MAIN] >>> Test: flags=0 async=0 <<<\n");
+    ret = test(0, fd, 0);
+    if (ret == T_EXIT_SKIP) {
+        printf("[MAIN] Test skipped: flags=0 async=0\n");
+        goto try_defer;
+    } else if (ret == T_EXIT_FAIL) {
+        printf("[MAIN] Test FAILED: flags=0 async=0\n");
+        return T_EXIT_FAIL;
+    }
+    printf("[MAIN] Test PASSED: flags=0 async=0\n");
 
-	ret = test(IORING_SETUP_SQPOLL, fd, 0);
-	if (ret == T_EXIT_FAIL)
-		return T_EXIT_FAIL;
+    printf("[MAIN] >>> Test: flags=0 async=1 <<<\n");
+    ret = test(0, fd, 1);
+    if (ret == T_EXIT_FAIL) {
+        printf("[MAIN] Test FAILED: flags=0 async=1\n");
+        return T_EXIT_FAIL;
+    }
+    printf("[MAIN] Test PASSED: flags=0 async=1\n");
 
-	ret = test(IORING_SETUP_SQPOLL, fd, 1);
-	if (ret == T_EXIT_FAIL)
-		return T_EXIT_FAIL;
+    printf("[MAIN] >>> Test: flags=IORING_SETUP_SQPOLL async=0 <<<\n");
+    ret = test(IORING_SETUP_SQPOLL, fd, 0);
+    if (ret == T_EXIT_FAIL) {
+        printf("[MAIN] Test FAILED: flags=IORING_SETUP_SQPOLL async=0\n");
+        return T_EXIT_FAIL;
+    }
+    printf("[MAIN] Test PASSED: flags=IORING_SETUP_SQPOLL async=0\n");
+
+    printf("[MAIN] >>> Test: flags=IORING_SETUP_SQPOLL async=1 <<<\n");
+    ret = test(IORING_SETUP_SQPOLL, fd, 1);
+    if (ret == T_EXIT_FAIL) {
+        printf("[MAIN] Test FAILED: flags=IORING_SETUP_SQPOLL async=1\n");
+        return T_EXIT_FAIL;
+    }
+    printf("[MAIN] Test PASSED: flags=IORING_SETUP_SQPOLL async=1\n");
 
 try_defer:
-	ret = test(IORING_SETUP_SINGLE_ISSUER | IORING_SETUP_DEFER_TASKRUN, fd, 0);
-	if (ret == T_EXIT_FAIL)
-		return T_EXIT_FAIL;
+    printf("[MAIN] >>> Test: flags=IORING_SETUP_SINGLE_ISSUER|IORING_SETUP_DEFER_TASKRUN async=0 <<<\n");
+    ret = test(IORING_SETUP_SINGLE_ISSUER | IORING_SETUP_DEFER_TASKRUN, fd, 0);
+    if (ret == T_EXIT_FAIL) {
+        printf("[MAIN] Test FAILED: flags=IORING_SETUP_SINGLE_ISSUER|IORING_SETUP_DEFER_TASKRUN async=0\n");
+        return T_EXIT_FAIL;
+    }
+    printf("[MAIN] Test PASSED: flags=IORING_SETUP_SINGLE_ISSUER|IORING_SETUP_DEFER_TASKRUN async=0\n");
 
-	ret = test(IORING_SETUP_SINGLE_ISSUER | IORING_SETUP_DEFER_TASKRUN, fd, 1);
-	if (ret == T_EXIT_FAIL)
-		return T_EXIT_FAIL;
+    printf("[MAIN] >>> Test: flags=IORING_SETUP_SINGLE_ISSUER|IORING_SETUP_DEFER_TASKRUN async=1 <<<\n");
+    ret = test(IORING_SETUP_SINGLE_ISSUER | IORING_SETUP_DEFER_TASKRUN, fd, 1);
+    if (ret == T_EXIT_FAIL) {
+        printf("[MAIN] Test FAILED: flags=IORING_SETUP_SINGLE_ISSUER|IORING_SETUP_DEFER_TASKRUN async=1\n");
+        return T_EXIT_FAIL;
+    }
+    printf("[MAIN] Test PASSED: flags=IORING_SETUP_SINGLE_ISSUER|IORING_SETUP_DEFER_TASKRUN async=1\n");
 
-	return T_EXIT_PASS;
+    printf("[MAIN] All tests finished successfully\n");
+    return T_EXIT_PASS;
 }
