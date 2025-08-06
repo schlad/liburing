@@ -197,7 +197,7 @@ static int do_recv(struct io_uring *ring, struct recv_data *rd)
 	verify_ptr = malloc(rd->recv_bytes);
 
 	do {
-		fprintf(stderr, "[DEBUG] Waiting for recv CQE...\n");
+		//fprintf(stderr, "[DEBUG] Waiting for recv CQE...\n");
 		if (recv_get_cqe(ring, rd, &cqe)) {
 			fprintf(stderr, "[DEBUG] recv_get_cqe() returned failure\n");
 			break;
@@ -311,9 +311,9 @@ static void *recv_fn(void *data)
        buf, (size_t)MSG_SIZE * RECV_BIDS, RECV_BIDS, MSG_SIZE);
 
 	if (!classic_buffers) {
-		fprintf(stderr, "[DEBUG] Using buffer ring path\n");
+		fprintf(stderr, "\n[PATH] Using **BUFFER RING** path for RECV (group=%d)\n", RECV_BGID);
 		br = io_uring_setup_buf_ring(&ring, RECV_BIDS, RECV_BGID, 0, &ret);
-		fprintf(stderr, "[DEBUG] recv buffer group %d setup result: %p (ret=%d)\n",
+		fprintf(stderr, "[DEBUG] io_uring_setup_buf_ring(RECV) returned %p (ret=%d)\n", br, ret);
         RECV_BGID, br, ret);
 		if (!br) {
 			if (ret != -EINVAL)
@@ -329,8 +329,9 @@ static void *recv_fn(void *data)
 		io_uring_buf_ring_advance(br, RECV_BIDS);
 		rd->recv_buf = buf;
 	} else {
-		fprintf(stderr, "[DEBUG] Using classic provide_buffers path\n");
+		fprintf(stderr, "\n[PATH] Using **CLASSIC PROVIDE_BUFFERS** path for RECV (group=%d)\n", RECV_BGID);
 		ret = provide_classic_buffers(&ring, buf, RECV_BIDS, RECV_BGID);
+		    fprintf(stderr, "[DEBUG] provide_classic_buffers(RECV) ret=%d\n", ret);
 		if (ret) {
 			fprintf(stderr, "failed providing classic buffers\n");
 			goto err;
@@ -477,8 +478,9 @@ static int do_send(struct recv_data *rd)
 		return 1;
 
 	if (!classic_buffers) {
-		fprintf(stderr, "[DEBUG] SEND: Using buffer ring path\n");
+		fprintf(stderr, "\n[PATH] Using **BUFFER RING** path for SEND (group=%d)\n", SEND_BGID);
 		br = io_uring_setup_buf_ring(&ring, nr_msgs, SEND_BGID, 0, &ret);
+		fprintf(stderr, "[DEBUG] io_uring_setup_buf_ring(SEND) returned %p (ret=%d)\n", br, ret);
 		if (!br) {
 			if (ret == -EINVAL) {
 				fprintf(stderr, "einval on br setup\n");
@@ -495,8 +497,9 @@ static int do_send(struct recv_data *rd)
 		}
 		io_uring_buf_ring_advance(br, nr_msgs);
 	} else {
-		fprintf(stderr, "[DEBUG] SEND: Using classic provide_buffers path\n");
+		fprintf(stderr, "\n[PATH] Using **CLASSIC PROVIDE_BUFFERS** path for SEND (group=%d)\n", SEND_BGID);
 		ret = provide_classic_buffers(&ring, buf, nr_msgs, SEND_BGID);
+		fprintf(stderr, "[DEBUG] provide_classic_buffers(SEND) ret=%d\n", ret);
 		if (ret) {
 			fprintf(stderr, "failed providing classic buffers\n");
 			return ret;
