@@ -284,6 +284,7 @@ static void *recv_fn(void *data)
 	p.cq_entries = 4096;
 	p.flags = IORING_SETUP_CQSIZE;
 	ret = t_create_ring_params(16, &ring, &p);
+	fprintf(stderr, "[DEBUG] t_create_ring_params returned %d\n", ret);
 	if (ret == T_SETUP_SKIP) {
 		ret = 0;
 		goto err;
