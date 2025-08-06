@@ -268,7 +268,7 @@ static int provide_classic_buffers(struct io_uring *ring, void *buf, int nbufs, 
 		fprintf(stderr, "provide buffers fail: %d\n", cqe->res);
 		return 1;
 	}
-	fprintf(stderr, "[DEBUG] Kernel accepted %d/%d classic buffers for group %d\n",
+	printf("[DEBUG] Kernel accepted %d/%d classic buffers for group %d\n",
 	cqe->res, nbufs, bgid);
 	io_uring_cqe_seen(ring, cqe);
 	return 0;
