@@ -200,6 +200,7 @@ static int do_recv(struct io_uring *ring, struct recv_data *rd)
 			fprintf(stderr, "[DEBUG] recv_get_cqe() returned failure\n");
 			break;
 		}
+		printf("[DEBUG] CQE: res=%d flags=0x%x", cqe->res, cqe->flags);
 		if (cqe->res == -EINVAL) {
 			fprintf(stdout, "recv not supported, skipping\n");
 			return 0;
