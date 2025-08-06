@@ -291,8 +291,12 @@ static void *recv_fn(void *data)
 		goto err;
 	}
 
-	if (posix_memalign(&buf, sysconf(_SC_PAGESIZE), MSG_SIZE * RECV_BIDS))
+	if (posix_memalign(&buf, sysconf(_SC_PAGESIZE), MSG_SIZE * RECV_BIDS)) {
+		perror("posix_memalign recv");
 		goto err;
+	}
+	printf("[DEBUG] Allocated RECV buffer: %p size=%zu bytes (RECV_BIDS=%d MSG_SIZE=%d)\n",
+       buf, (size_t)MSG_SIZE * RECV_BIDS, RECV_BIDS, MSG_SIZE);
 
 	if (!classic_buffers) {
 		br = io_uring_setup_buf_ring(&ring, RECV_BIDS, RECV_BGID, 0, &ret);
