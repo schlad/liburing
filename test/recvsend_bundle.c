@@ -258,17 +258,20 @@ static int provide_classic_buffers(struct io_uring *ring, void *buf, int nbufs, 
 	sqe = io_uring_get_sqe(ring);
 	io_uring_prep_provide_buffers(sqe, buf, MSG_SIZE, nbufs, bgid, 0);
 	io_uring_submit(ring);
+	printf("[DEBUG]  provide_classic_buffers");
 
 	ret = io_uring_wait_cqe(ring, &cqe);
 	if (ret) {
 		fprintf(stderr, "provide buffer wait: %d\n", ret);
 		return 1;
 	}
+	printf("[DEBUG] Kernel accepted %d/%d classic buffers for group %d\n",
+	cqe->res, nbufs, bgid);
 	if (cqe->res) {
 		fprintf(stderr, "provide buffers fail: %d\n", cqe->res);
 		return 1;
 	}
-	printf("[DEBUG] Kernel accepted %d/%d classic buffers for group %d\n",
+	printf("[DEBUG1] Kernel accepted %d/%d classic buffers for group %d\n",
 	cqe->res, nbufs, bgid);
 	io_uring_cqe_seen(ring, cqe);
 	return 0;
