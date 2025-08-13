@@ -637,7 +637,7 @@ static int run_tests(int is_udp)
 	/* test recv bundle */
 	ret = test(0, 0, NULL, 0, 1);
 	if (ret) {
-		fprintf(stderr, "test b failed ");
+		fprintf(stderr, "test b failed\n");
 		return T_EXIT_FAIL;
 	}
 	printf(" test b passed ");
