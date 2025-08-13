@@ -12,7 +12,7 @@
 #include <sys/socket.h>
 #include <pthread.h>
 
-#define MSG_SIZE 256
+#define MSG_SIZE 128
 #define NR_MIN_MSGS	4
 #define NR_MAX_MSGS	32
 #define SEQ_SIZE	(MSG_SIZE / sizeof(unsigned long))
@@ -21,7 +21,7 @@ static int nr_msgs;
 static int use_tcp;
 static int classic_buffers;
 
-#define RECV_BIDS	8192
+#define RECV_BIDS	16384
 #define RECV_BID_MASK	(RECV_BIDS - 1)
 
 #include "liburing.h"
