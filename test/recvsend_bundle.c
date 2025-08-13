@@ -461,7 +461,7 @@ static int do_send(struct recv_data *rd)
 
 	if (!classic_buffers) {
 		br = io_uring_setup_buf_ring(&ring, nr_msgs, SEND_BGID, 0, &ret);
-		printf("here");
+		printf("here\n");
 		fprintf(stderr, "setup_buf_ring ret=%d br=%p RECV_BIDS=%d\n",
 			ret, br, nr_msgs);
 		if (!br) {
