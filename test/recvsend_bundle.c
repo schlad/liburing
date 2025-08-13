@@ -761,8 +761,6 @@ int main(int argc, char *argv[])
 	if (argc > 1)
 		return T_EXIT_SKIP;
 
-	classic_buffers = 1;
-
 	ret = test_tcp();
 	if (ret != T_EXIT_PASS)
 		return ret;
@@ -770,6 +768,8 @@ int main(int argc, char *argv[])
 	ret = test_udp();
 	if (ret != T_EXIT_PASS)
 		return ret;
+
+	classic_buffers = 1;
 
 	ret = test_tcp();
 	if (ret != T_EXIT_PASS)
