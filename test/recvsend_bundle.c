@@ -12,7 +12,7 @@
 #include <sys/socket.h>
 #include <pthread.h>
 
-#define MSG_SIZE 128
+#define MSG_SIZE 256
 #define NR_MIN_MSGS	4
 #define NR_MAX_MSGS	32
 #define SEQ_SIZE	(MSG_SIZE / sizeof(unsigned long))
