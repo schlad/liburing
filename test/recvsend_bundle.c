@@ -200,6 +200,16 @@ static int do_recv(struct io_uring *ring, struct recv_data *rd)
 	do {
 		if (recv_get_cqe(ring, rd, &cqe))
 			break;
+		fprintf(stderr, "RECV cqe: res=%d flags=0x%x ud=%llu",
+			cqe->res, cqe->flags,
+			(unsigned long long)cqe->user_data);
+		if (cqe->flags & IORING_CQE_F_BUFFER) {
+			int bid = cqe->flags >> IORING_CQE_BUFFER_SHIFT;
+			fprintf(stderr, " (bid=%d)\n", bid);
+		} else {
+			fprintf(stderr, " (no buffer flag)\n");
+		}
+
 		if (cqe->res == -EINVAL) {
 			fprintf(stdout, "recv not supported, skipping\n");
 			return 0;
@@ -466,6 +476,8 @@ static int do_send(struct recv_data *rd)
 		printf("here\n");
 		fprintf(stderr, "setup_buf_ring ret=%d br=%p RECV_BIDS=%d\n",
 			ret, br, nr_msgs);
+		fprintf(stderr, "SEND buf_ring: ret=%d br=%p msgs=%d bgid=%d classic=%d\n",
+			ret, br, nr_msgs, SEND_BGID, classic_buffers);
 		if (!br) {
 			if (ret == -EINVAL) {
 				fprintf(stderr, "einval on br setup\n");
