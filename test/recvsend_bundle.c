@@ -132,6 +132,9 @@ static int recv_prep(struct io_uring *ring, struct recv_data *rd, int *sock)
 	pthread_barrier_wait(&rd->startup);
 	pthread_barrier_wait(&rd->barrier);
 
+	fprintf(stderr, "recv: about to arm, rd->recv_bytes=%d, pool=%d\n",
+        rd->recv_bytes, RECV_BIDS * MSG_SIZE);
+
 	if (arm_recv(ring, rd))
 		goto err;
 
