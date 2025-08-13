@@ -630,17 +630,17 @@ static int run_tests(int is_udp)
 		fprintf(stderr, "test a failed\n");
 		return T_EXIT_FAIL;
 	}
-	printf(" test a passed\n");
+	printf(" test a passed ");
 	if (no_send_mshot)
 		return T_EXIT_SKIP;
 
 	/* test recv bundle */
 	ret = test(0, 0, NULL, 0, 1);
 	if (ret) {
-		fprintf(stderr, "test b failed\n");
+		fprintf(stderr, "test b failed ");
 		return T_EXIT_FAIL;
 	}
-	printf(" test b passed\n");
+	printf(" test b passed ");
 
 	/* test bundling recv and send */
 	ret = test(0, 0, NULL, 1, 1);
@@ -648,7 +648,7 @@ static int run_tests(int is_udp)
 		fprintf(stderr, "test c failed\n");
 		return T_EXIT_FAIL;
 	}
-	printf(" test c passed\n");
+	printf(" test c passed ");
 
 	/* test bundling with full socket */
 	ret = test(1, 1000000, &eagain_hit, 1, 1);
@@ -656,7 +656,7 @@ static int run_tests(int is_udp)
 		fprintf(stderr, "test d failed\n");
 		return T_EXIT_FAIL;
 	}
-	printf(" test d passed\n");
+	printf(" test d passed ");
 
 	/* test bundling with almost full socket */
 	ret = test(1, eagain_hit - (nr_msgs / 2), NULL, 1, 1);
@@ -664,14 +664,14 @@ static int run_tests(int is_udp)
 		fprintf(stderr, "test e failed\n");
 		return T_EXIT_FAIL;
 	}
-
+    printf(" test e passed ");
 	/* test recv bundle with almost full socket */
 	ret = test(1, eagain_hit - (nr_msgs / 2), NULL, 0, 1);
 	if (ret) {
 		fprintf(stderr, "test f failed\n");
 		return T_EXIT_FAIL;
 	}
-	printf(" test f passed\n");
+	printf(" test f passed ");
 
 	if (is_udp)
 		return T_EXIT_PASS;
@@ -682,7 +682,7 @@ static int run_tests(int is_udp)
 		fprintf(stderr, "test g failed\n");
 		return T_EXIT_FAIL;
 	}
-	printf(" test g passed\n");
+	printf(" test g passed ");
 
 	/* now repeat the last three tests, but with > FAST_UIOV segments */
 	nr_msgs = NR_MAX_MSGS;
@@ -693,7 +693,7 @@ static int run_tests(int is_udp)
 		fprintf(stderr, "test h failed\n");
 		return T_EXIT_FAIL;
 	}
-	printf(" test h passed\n");
+	printf(" test h passed ");
 
 	/* test recv bundle with almost full socket */
 	ret = test(1, eagain_hit - (nr_msgs / 2), NULL, 0, 1);
@@ -701,7 +701,7 @@ static int run_tests(int is_udp)
 		fprintf(stderr, "test i failed\n");
 		return T_EXIT_FAIL;
 	}
-	printf(" test i passed\n");
+	printf(" test i passed ");
 
 	/* test send bundle with almost full socket */
 	ret = test(1, eagain_hit - (nr_msgs / 2), &eagain_hit, 1, 0);
@@ -709,7 +709,7 @@ static int run_tests(int is_udp)
 		fprintf(stderr, "test j failed\n");
 		return T_EXIT_FAIL;
 	}
-	printf(" test j passed\n");
+	printf(" test j passed ");
 
 	return T_EXIT_PASS;
 }
