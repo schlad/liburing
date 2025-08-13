@@ -52,6 +52,8 @@ struct recv_data {
 
 	int send_bundle;
 	int recv_bundle;
+
+	int rcvbuf_bytes;
 };
 
 static int arm_recv(struct io_uring *ring, struct recv_data *rd)
@@ -81,6 +83,7 @@ static int recv_prep(struct io_uring *ring, struct recv_data *rd, int *sock)
 	struct sockaddr_in saddr;
 	int sockfd, ret, val, use_fd;
 	socklen_t socklen;
+	int rcv = 0;
 
 	memset(&saddr, 0, sizeof(saddr));
 	saddr.sin_family = AF_INET;
@@ -127,6 +130,12 @@ static int recv_prep(struct io_uring *ring, struct recv_data *rd, int *sock)
 		use_fd = sockfd;
 		pthread_barrier_wait(&rd->connect);
 	}
+
+	socklen_t optlen = sizeof(rcv);
+	if (!getsockopt(use_fd, SOL_SOCKET, SO_RCVBUF, &rcv, &optlen))
+		rd->rcvbuf_bytes = rcv;
+	else
+		rd->rcvbuf_bytes = 0;
 
 	rd->accept_fd = use_fd;
 	pthread_barrier_wait(&rd->startup);
@@ -516,6 +525,9 @@ static int do_send(struct recv_data *rd)
 	send_seq = 0;
 	rd->to_eagain = 0;
 	while (rd->max_sends && rd->max_sends--) {
+		/* If we know the peer's RCVBUF, stop when we've queued enough */
+		if (rd->rcvbuf_bytes > 0 && rd->recv_bytes >= (rd->rcvbuf_bytes / 2))
+			break;
 		for (i = 0; i < SEQ_SIZE; i++)
 			seq_buf[i] = send_seq++;
 
