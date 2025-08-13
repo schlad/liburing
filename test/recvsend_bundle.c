@@ -299,6 +299,8 @@ static void *recv_fn(void *data)
 
 	if (!classic_buffers) {
 		br = io_uring_setup_buf_ring(&ring, RECV_BIDS, RECV_BGID, 0, &ret);
+		fprintf(stderr, "RECV buf_ring: ret=%d br=%p bids=%d bgid=%d classic=%d\n",
+			ret, br, RECV_BIDS, RECV_BGID, classic_buffers);
 		if (!br) {
 			if (ret != -EINVAL)
 				fprintf(stderr, "failed setting up recv ring %d\n", ret);
