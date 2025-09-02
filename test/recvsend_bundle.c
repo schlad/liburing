@@ -56,7 +56,8 @@ struct recv_data {
 
 static void _set_recvbuf(int fd, const char *label)
 {
-	int recvbuf = ((RECV_BIDS * MSG_SIZE) /2);
+	//int recvbuf = ((RECV_BIDS * MSG_SIZE) /2);
+	int recvbuf = 128 * 1024;
 
 	if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &recvbuf, sizeof(recvbuf)) < 0)
 		perror("setsockopt(SO_RCVBUF)");
