@@ -54,6 +54,19 @@ struct recv_data {
 	int recv_bundle;
 };
 
+static void _set_recvbuf(int fd, const char *label)
+{
+	int recvbuf = RECV_BIDS * MSG_SIZE;
+
+	if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &recvbuf, sizeof(recvbuf)) < 0)
+		perror("setsockopt(SO_RCVBUF)");
+
+	int got = 0; socklen_t sl = sizeof(got);
+	if (!getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &got, &sl))
+		fprintf(stderr, "[%s] SO_RCVBUF: %d (~usable %d)\n", label, got, got/2);
+
+}
+
 static int arm_recv(struct io_uring *ring, struct recv_data *rd)
 {
 	struct io_uring_sqe *sqe;
@@ -98,6 +111,7 @@ static int recv_prep(struct io_uring *ring, struct recv_data *rd, int *sock)
 
 	val = 1;
 	setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
+	_set_recvbuf(sockfd, "recv/listen-or-udp");
 
 	ret = bind(sockfd, (struct sockaddr *)&saddr, sizeof(saddr));
 	if (ret < 0) {
@@ -123,6 +137,7 @@ static int recv_prep(struct io_uring *ring, struct recv_data *rd, int *sock)
 			perror("accept");
 			goto err;
 		}
+		_set_recvbuf(use_fd, "recv/tcp-accepted");
 	} else {
 		use_fd = sockfd;
 		pthread_barrier_wait(&rd->connect);
