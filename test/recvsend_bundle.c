@@ -526,8 +526,11 @@ static int do_send(struct recv_data *rd)
 	rd->to_eagain = 0;
 	while (rd->max_sends && rd->max_sends--) {
 		/* If we know the peer's RCVBUF, stop when we've queued enough */
-		if (rd->rcvbuf_bytes > 0 && rd->recv_bytes >= (rd->rcvbuf_bytes / 2))
+		if (rd->rcvbuf_bytes > 0 && rd->recv_bytes >= (rd->rcvbuf_bytes / 2)) {
+			fprintf(stderr, "[prefill] stop: hit RCVBUF cap (queued=%d, cap≈%d, kernel=%d)\n",
+			rd->recv_bytes, rd->rcvbuf_bytes / 2, rd->rcvbuf_bytes);
 			break;
+		}
 		for (i = 0; i < SEQ_SIZE; i++)
 			seq_buf[i] = send_seq++;
 
@@ -535,13 +538,24 @@ static int do_send(struct recv_data *rd)
 		if (ret < 0) {
 			if (errno == EAGAIN) {
 				send_seq -= SEQ_SIZE;
+            fprintf(stderr,
+                    "[prefill] stop: hit EAGAIN after %d blocks (%d bytes queued)\n",
+                    rd->to_eagain, rd->recv_bytes);
 				break;
 			}
 			perror("send");
 			return 1;
 		} else if (ret != sizeof(seq_buf)) {
 			fprintf(stderr, "short %d send\n", ret);
+        	fprintf(stderr, "[prefill] short send=%d (queued=%d) — treating as failure\n",
+                ret, rd->recv_bytes);
 			return 1;
+		}
+
+		if (!rd->max_sends) {
+    		fprintf(stderr,
+            "[prefill] stop: max_sends exhausted (blocks=%d, bytes=%d)\n",
+            rd->to_eagain, rd->recv_bytes);
 		}
 
 		rd->to_eagain++;
