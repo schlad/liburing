@@ -130,10 +130,11 @@ static int recv_prep(struct io_uring *ring, struct recv_data *rd, int *sock)
 
 	rd->accept_fd = use_fd;
 	pthread_barrier_wait(&rd->startup);
-	pthread_barrier_wait(&rd->barrier);
 
 	if (arm_recv(ring, rd))
 		goto err;
+
+	pthread_barrier_wait(&rd->barrier);
 
 	*sock = sockfd;
 	return 0;
