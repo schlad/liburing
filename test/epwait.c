@@ -12,6 +12,15 @@
 #include <pthread.h>
 #include "liburing.h"
 #include "helpers.h"
+#include <sched.h>
+
+void pin_thread_to_cpu(int cpu)
+{
+	cpu_set_t cpuset;
+	CPU_ZERO(&cpuset);
+	CPU_SET(cpu, &cpuset);
+	pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+}
 
 static int fds[2][2];
 static int no_epoll_wait;
@@ -204,8 +213,10 @@ static void *thread_fn(void *data)
 {
 	struct d *d = data;
 	int i, j;
-
+	printf("writer thread running\n");
+	pin_thread_to_cpu(0);
 	for (j = 0; j < LOOPS; j++) {
+		printf("writer iteration %d\n", j);
 		usleep(150);
 		for (i = 0; i < NPIPES; i++) {
 			int ret;
@@ -243,14 +254,17 @@ static int test_race(int flags)
 	int i, j, efd, ret;
 	void *tret;
 
-	ret = t_create_ring(32, &ring, flags);
-	if (ret == T_SETUP_SKIP) {
-		return 0;
-	} else if (ret != T_SETUP_OK) {
-		fprintf(stderr, "ring create failed %x -> %d\n", flags, ret);
+	struct io_uring_params p;
+	memset(&p, 0, sizeof(p));
+
+	if (flags & IORING_SETUP_SQPOLL)
+		p.sq_thread_cpu = 1; // Pin SQPOLL to CPU 1
+
+	ret = io_uring_queue_init_params(32, &ring, &p);
+	if (ret) {
+		fprintf(stderr, "ring create failed: %d\n", ret);
 		return 1;
 	}
-
 	for (i = 0; i < NPIPES; i++) {
 		if (pipe(d.pipes[i]) < 0) {
 			perror("pipe");
