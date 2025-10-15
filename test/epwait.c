@@ -242,6 +242,7 @@ static int test_race(int flags)
 	pthread_t thread;
 	int i, j, efd, ret;
 	void *tret;
+	struct __kernel_timespec ts = { .tv_sec = 2, .tv_nsec = 0 };
 
 	ret = t_create_ring(32, &ring, flags);
 	if (ret == T_SETUP_SKIP) {
@@ -281,22 +282,25 @@ static int test_race(int flags)
 	pthread_create(&thread, NULL, thread_fn, &d);
 
 	for (j = 0; j < LOOPS; j++) {
-		io_uring_submit_and_wait(&ring, 1);
-
-		ret = io_uring_wait_cqe(&ring, &cqe);
+		ret = io_uring_wait_cqe_timeout(&ring, &cqe, &ts);
 		if (ret) {
-			fprintf(stderr, "wait %d\n", ret);
+			fprintf(stderr, "test_race: wait %d (timeout or error)\n", ret);
 			return 1;
 		}
 		if (cqe->res < 0) {
 			fprintf(stderr, "race res %d\n", cqe->res);
+			io_uring_cqe_seen(&ring, cqe);
 			return 1;
 		}
+
 		prune(out, cqe->res);
 		io_uring_cqe_seen(&ring, cqe);
-		usleep(100);
+
 		sqe = io_uring_get_sqe(&ring);
 		io_uring_prep_epoll_wait(sqe, efd, out, NPIPES, 0);
+		io_uring_submit(&ring);
+
+		usleep(100);
 	}
 
 	pthread_join(thread, &tret);
