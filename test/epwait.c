@@ -240,8 +240,11 @@ static int test_race(int flags)
 	struct epoll_event ev;
 	struct epoll_event out[NPIPES];
 	pthread_t thread;
-	int i, j, efd, ret;
+	int i, efd, ret;
 	void *tret;
+
+	size_t drained = 0;
+	const size_t expected = (size_t)LOOPS * NPIPES * 3;
 
 	ret = t_create_ring(32, &ring, flags);
 	if (ret == T_SETUP_SKIP) {
@@ -252,7 +255,7 @@ static int test_race(int flags)
 	}
 
 	for (i = 0; i < NPIPES; i++) {
-		if (pipe(d.pipes[i]) < 0) {
+	if (pipe(d.pipes[i]) < 0) {
 			perror("pipe");
 			return 1;
 		}
@@ -280,7 +283,7 @@ static int test_race(int flags)
 
 	pthread_create(&thread, NULL, thread_fn, &d);
 
-	for (j = 0; j < LOOPS; j++) {
+	while (drained < expected) {
 		io_uring_submit_and_wait(&ring, 1);
 
 		ret = io_uring_wait_cqe(&ring, &cqe);
@@ -292,7 +295,16 @@ static int test_race(int flags)
 			fprintf(stderr, "race res %d\n", cqe->res);
 			return 1;
 		}
-		prune(out, cqe->res);
+
+		for (i = 0; i < cqe->res; i++) {
+			char tmp[32];
+			int r = read(out[i].data.fd, tmp, sizeof(tmp));
+			if (r < 0)
+				perror("read");
+			else
+				drained += (size_t)r;
+		}
+
 		io_uring_cqe_seen(&ring, cqe);
 		usleep(100);
 		sqe = io_uring_get_sqe(&ring);
