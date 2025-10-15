@@ -304,7 +304,7 @@ static int test_race(int flags)
         }
 
         /* optional: your instrumentation */
-        // printf("race[%d]: cqe->res=%d\n", j, cqe->res); fflush(stdout);
+        printf("race[%d]: cqe->res=%d\n", j, cqe->res); fflush(stdout);
 
         prune(out, cqe->res);
         io_uring_cqe_seen(&ring, cqe);
