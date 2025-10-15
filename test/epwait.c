@@ -231,6 +231,51 @@ static void prune(struct epoll_event *evs, int nr)
 	}
 }
 
+static int test_race_epoll_only(void)
+{
+    struct d d;
+    pthread_t thread;
+    struct epoll_event ev, out[NPIPES];
+    int efd = -1, ret = 1;
+
+    for (int i = 0; i < NPIPES; i++) {
+        if (pipe(d.pipes[i]) < 0) { perror("pipe"); return 1; }
+    }
+    efd = epoll_create1(0);
+    if (efd < 0) { perror("epoll_create1"); goto out; }
+
+    for (int i = 0; i < NPIPES; i++) {
+        ev.events = EPOLLIN;
+        ev.data.fd = d.pipes[i][0];
+        if (epoll_ctl(efd, EPOLL_CTL_ADD, d.pipes[i][0], &ev) < 0) {
+            perror("epoll_ctl"); goto out;
+        }
+    }
+
+    pthread_create(&thread, NULL, thread_fn, &d);
+
+    for (int j = 0; j < LOOPS; j++) {
+        int nr = epoll_wait(efd, out, NPIPES, -1);  // block like the uring test
+        if (nr < 0) { perror("epoll_wait"); goto join_out; }
+        // drain exactly what epoll reported
+        for (int i = 0; i < nr; i++) {
+            char tmp[32];
+            int r = read(out[i].data.fd, tmp, sizeof(tmp));
+            if (r < 0) perror("read");
+        }
+    }
+    ret = 0;
+
+join_out:
+    pthread_join(thread, NULL);
+out:
+    if (efd >= 0) close(efd);
+    for (int i = 0; i < NPIPES; i++) {
+        close(d.pipes[i][0]); close(d.pipes[i][1]);
+    }
+    return ret;
+}
+
 static int test_race(int flags)
 {
 	struct io_uring_cqe *cqe;
@@ -377,6 +422,11 @@ static int test(int flags)
 	for (i = 0; i < 2; i++) {
 		close(fds[i][0]);
 		close(fds[i][1]);
+	}
+
+	if (test_race_epoll_only()) {
+    	fprintf(stderr, "epoll-only control failed/hung -> not an io_uring-specific issue\n");
+    	return T_EXIT_FAIL;
 	}
 
 	ret = test_race(flags);
