@@ -219,16 +219,20 @@ static void *thread_fn(void *data)
 	return NULL;
 }
 
-static void prune(struct epoll_event *evs, int nr)
+static size_t prune(struct epoll_event *evs, int nr)
 {
 	char tmp[32];
 	int i, ret;
+	size_t bytes = 0;
 
 	for (i = 0; i < nr; i++) {
 		ret = read(evs[i].data.fd, tmp, sizeof(tmp));
 		if (ret < 0)
 			perror("read");
+		else
+			bytes += (size_t)ret;
 	}
+	return bytes;
 }
 
 static int test_race(int flags)
@@ -242,6 +246,8 @@ static int test_race(int flags)
 	pthread_t thread;
 	int i, j, efd, ret;
 	void *tret;
+	size_t drained = 0;
+	const size_t expected = (size_t)LOOPS * NPIPES * 3; /* foo */
 
 	ret = t_create_ring(32, &ring, flags);
 	if (ret == T_SETUP_SKIP) {
@@ -292,8 +298,16 @@ static int test_race(int flags)
 			fprintf(stderr, "race res %d\n", cqe->res);
 			return 1;
 		}
-		prune(out, cqe->res);
+		drained += prune(out, cqe->res);
+
 		io_uring_cqe_seen(&ring, cqe);
+		/*
+		* If all producer bytes are consumed, don't re-arm & wait.
+		* May exceed expected if read() drains multiple messages at once.
+		*/
+		if (drained >= expected)
+			break;
+
 		usleep(100);
 		sqe = io_uring_get_sqe(&ring);
 		io_uring_prep_epoll_wait(sqe, efd, out, NPIPES, 0);
