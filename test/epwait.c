@@ -310,81 +310,124 @@ out:
 
 static int test_race(int flags)
 {
-	struct io_uring_cqe *cqe;
-	struct io_uring_sqe *sqe;
-	struct io_uring ring;
-	struct d d;
-	struct epoll_event ev;
-	struct epoll_event out[NPIPES];
-	pthread_t thread;
-	int i, j, efd, ret;
-	void *tret;
+    struct io_uring_cqe *cqe;
+    struct io_uring_sqe *sqe;
+    struct io_uring ring;
+    struct d d;
+    struct epoll_event ev;
+    struct epoll_event out[NPIPES];
+    pthread_t thread;
+    int i, efd, ret;
+    void *tret;
+    size_t drained = 0;
+    const size_t expected = (size_t)LOOPS * NPIPES * 3; /* each write is "foo" */
 
-	ret = t_create_ring(32, &ring, flags);
-	if (ret == T_SETUP_SKIP) {
-		return 0;
-	} else if (ret != T_SETUP_OK) {
-		fprintf(stderr, "ring create failed %x -> %d\n", flags, ret);
-		return 1;
-	}
+    ret = t_create_ring(32, &ring, flags);
+    if (ret == T_SETUP_SKIP) {
+        return 0;
+    } else if (ret != T_SETUP_OK) {
+        fprintf(stderr, "ring create failed %x -> %d\n", flags, ret);
+        return 1;
+    }
 
-	for (i = 0; i < NPIPES; i++) {
-		if (pipe(d.pipes[i]) < 0) {
-			perror("pipe");
-			return 1;
-		}
-	}
+    for (i = 0; i < NPIPES; i++) {
+        if (pipe(d.pipes[i]) < 0) {
+            perror("pipe");
+            io_uring_queue_exit(&ring);
+            return 1;
+        }
+    }
 
-	efd = epoll_create1(0);
-	if (efd < 0) {
-		perror("epoll_create");
-		return T_EXIT_FAIL;
-	}
+    efd = epoll_create1(0);
+    if (efd < 0) {
+        perror("epoll_create");
+        for (i = 0; i < NPIPES; i++) {
+            close(d.pipes[i][0]);
+            close(d.pipes[i][1]);
+        }
+        io_uring_queue_exit(&ring);
+        return T_EXIT_FAIL;
+    }
 
-	for (i = 0; i < NPIPES; i++) {
-		ev.events = EPOLLIN;
-		ev.data.fd = d.pipes[i][0];
-		ret = epoll_ctl(efd, EPOLL_CTL_ADD, d.pipes[i][0], &ev);
-		if (ret < 0) {
-			perror("epoll_ctl");
-			return T_EXIT_FAIL;
-		}
-	}
+    for (i = 0; i < NPIPES; i++) {
+        ev.events = EPOLLIN;
+        ev.data.fd = d.pipes[i][0];
+        ret = epoll_ctl(efd, EPOLL_CTL_ADD, d.pipes[i][0], &ev);
+        if (ret < 0) {
+            perror("epoll_ctl");
+            close(efd);
+            for (i = 0; i < NPIPES; i++) {
+                close(d.pipes[i][0]);
+                close(d.pipes[i][1]);
+            }
+            io_uring_queue_exit(&ring);
+            return T_EXIT_FAIL;
+        }
+    }
 
-	sqe = io_uring_get_sqe(&ring);
-	io_uring_prep_epoll_wait(sqe, efd, out, NPIPES, 0);
-	io_uring_submit(&ring);
+    /* arm first wait */
+    memset(out, 0, sizeof(out));
+    sqe = io_uring_get_sqe(&ring);
+    io_uring_prep_epoll_wait(sqe, efd, out, NPIPES, 0);
+    io_uring_submit(&ring);
 
-	pthread_create(&thread, NULL, thread_fn, &d);
+    /* start writer */
+    pthread_create(&thread, NULL, thread_fn, &d);
 
-	for (j = 0; j < LOOPS; j++) {
-		io_uring_submit_and_wait(&ring, 1);
+    /* drain until all producer bytes have been read */
+    while (drained < expected) {
+        /* make sure the armed wait is submitted and we block for its CQE */
+        io_uring_submit_and_wait(&ring, 1);
 
-		ret = io_uring_wait_cqe(&ring, &cqe);
-		if (ret) {
-			fprintf(stderr, "wait %d\n", ret);
-			return 1;
-		}
-		if (cqe->res < 0) {
-			fprintf(stderr, "race res %d\n", cqe->res);
-			return 1;
-		}
-		prune(out, cqe->res);
-		io_uring_cqe_seen(&ring, cqe);
-		usleep(100);
-		sqe = io_uring_get_sqe(&ring);
-		io_uring_prep_epoll_wait(sqe, efd, out, NPIPES, 0);
-	}
+        ret = io_uring_wait_cqe(&ring, &cqe);
+        if (ret) {
+            fprintf(stderr, "wait %d\n", ret);
+            goto fail;
+        }
+        if (cqe->res < 0) {
+            fprintf(stderr, "race res %d\n", cqe->res);
+            io_uring_cqe_seen(&ring, cqe);
+            goto fail;
+        }
 
-	pthread_join(thread, &tret);
+        /* read exactly the fds reported by epoll (cqe->res) */
+        for (i = 0; i < cqe->res; i++) {
+            char tmp[32];
+            int r = read(out[i].data.fd, tmp, sizeof(tmp));
+            if (r < 0) {
+                perror("read");
+            } else {
+                drained += (size_t)r;
+            }
+        }
 
-	for (i = 0; i < NPIPES; i++) {
-		close(d.pipes[i][0]);
-		close(d.pipes[i][1]);
-	}
-	close(efd);
-	io_uring_queue_exit(&ring);
-	return 0;
+        io_uring_cqe_seen(&ring, cqe);
+
+        /* re-arm for the next batch */
+        memset(out, 0, sizeof(out));
+        sqe = io_uring_get_sqe(&ring);
+        io_uring_prep_epoll_wait(sqe, efd, out, NPIPES, 0);
+    }
+
+    pthread_join(thread, &tret);
+
+    for (i = 0; i < NPIPES; i++) {
+        close(d.pipes[i][0]);
+        close(d.pipes[i][1]);
+    }
+    close(efd);
+    io_uring_queue_exit(&ring);
+    return 0;
+
+fail:
+    pthread_join(thread, &tret);
+    for (i = 0; i < NPIPES; i++) {
+        close(d.pipes[i][0]);
+        close(d.pipes[i][1]);
+    }
+    close(efd);
+    io_uring_queue_exit(&ring);
+    return 1;
 }
 
 static int test(int flags)
