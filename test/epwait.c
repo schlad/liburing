@@ -233,20 +233,21 @@ static void prune(struct epoll_event *evs, int nr)
 
 static int test_race(int flags)
 {
-	struct io_uring_cqe *cqe;
-	struct io_uring_sqe *sqe;
 	struct io_uring ring;
+	struct io_uring_sqe *sqe;
+	struct io_uring_cqe *cqe;
 	struct d d;
 	struct epoll_event ev;
-	struct epoll_event out[NPIPES];
+	/* two ping-pong buffers */
+	struct epoll_event out[2][NPIPES];
 	pthread_t thread;
 	int i, j, efd, ret;
 	void *tret;
 
 	ret = t_create_ring(32, &ring, flags);
-	if (ret == T_SETUP_SKIP) {
+	if (ret == T_SETUP_SKIP)
 		return 0;
-	} else if (ret != T_SETUP_OK) {
+	else if (ret != T_SETUP_OK) {
 		fprintf(stderr, "ring create failed %x -> %d\n", flags, ret);
 		return 1;
 	}
@@ -254,6 +255,7 @@ static int test_race(int flags)
 	for (i = 0; i < NPIPES; i++) {
 		if (pipe(d.pipes[i]) < 0) {
 			perror("pipe");
+			io_uring_queue_exit(&ring);
 			return 1;
 		}
 	}
@@ -261,6 +263,8 @@ static int test_race(int flags)
 	efd = epoll_create1(0);
 	if (efd < 0) {
 		perror("epoll_create");
+		for (i = 0; i < NPIPES; i++) { close(d.pipes[i][0]); close(d.pipes[i][1]); }
+		io_uring_queue_exit(&ring);
 		return T_EXIT_FAIL;
 	}
 
@@ -270,14 +274,27 @@ static int test_race(int flags)
 		ret = epoll_ctl(efd, EPOLL_CTL_ADD, d.pipes[i][0], &ev);
 		if (ret < 0) {
 			perror("epoll_ctl");
+			for (i = 0; i < NPIPES; i++) { close(d.pipes[i][0]); close(d.pipes[i][1]); }
+			close(efd);
+			io_uring_queue_exit(&ring);
 			return T_EXIT_FAIL;
 		}
 	}
 
+	memset(out, 0, sizeof(out));
+
+	/* arm TWO waits up front; tag them with user_data = 0 / 1 */
 	sqe = io_uring_get_sqe(&ring);
-	io_uring_prep_epoll_wait(sqe, efd, out, NPIPES, 0);
+	io_uring_prep_epoll_wait(sqe, efd, out[0], NPIPES, 0);
+	sqe->user_data = 0;
+
+	sqe = io_uring_get_sqe(&ring);
+	io_uring_prep_epoll_wait(sqe, efd, out[1], NPIPES, 0);
+	sqe->user_data = 1;
+
 	io_uring_submit(&ring);
 
+	/* start writer */
 	pthread_create(&thread, NULL, thread_fn, &d);
 
 	for (j = 0; j < LOOPS; j++) {
@@ -292,16 +309,30 @@ static int test_race(int flags)
 			goto fail;
 		}
 
-		prune(out, cqe->res);
+		/* identify which buffer got filled: 0 or 1 */
+		unsigned buf_id = (unsigned)cqe->user_data;
+		if (buf_id > 1) buf_id = 0; /* defensive */
+
+		/* drain exactly cqe->res events from the right buffer */
+		for (i = 0; i < cqe->res; i++) {
+			char tmp[32];
+			int fd = out[buf_id][i].data.fd;
+			if (fd >= 0) {
+				int r = read(fd, tmp, sizeof(tmp));
+				if (r < 0)
+					perror("read");
+			}
+		}
+		/* clear only the entries we consumed */
+		memset(out[buf_id], 0, sizeof(struct epoll_event) * (unsigned)cqe->res);
+
 		io_uring_cqe_seen(&ring, cqe);
 
-		usleep(100);
-
-		if (j + 1 < LOOPS) {
-			sqe = io_uring_get_sqe(&ring);
-			io_uring_prep_epoll_wait(sqe, efd, out, NPIPES, 0);
-			io_uring_submit(&ring);
-		}
+		/* immediately re-arm the SAME buffer we just consumed from */
+		sqe = io_uring_get_sqe(&ring);
+		io_uring_prep_epoll_wait(sqe, efd, out[buf_id], NPIPES, 0);
+		sqe->user_data = buf_id;
+		io_uring_submit(&ring);
 	}
 
 	pthread_join(thread, &tret);
