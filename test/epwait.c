@@ -426,9 +426,13 @@ static int test(int flags)
 		close(fds[i][1]);
 	}
 
-	if (test_race_epoll_only()) {
-		fprintf(stderr, "epoll-only control failed/hung -> not an io_uring-specific issue\n");
-		return T_EXIT_FAIL;
+	fprintf(stderr, "[ctrl] epoll-only start\n"); fflush(stderr);
+	int ctrl = test_race_epoll_only();
+	fprintf(stderr, "[ctrl] epoll-only rc=%d\n", ctrl); fflush(stderr);
+
+	if (ctrl) {
+    	fprintf(stderr, "epoll-only control failed/hung -> not an io_uring-specific issue\n");
+    	return T_EXIT_FAIL;
 	}
 
 	ret = test_race(flags);
