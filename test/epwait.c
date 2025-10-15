@@ -465,6 +465,7 @@ static int test(int flags)
     	return T_EXIT_FAIL;
 	}
 
+	fprintf(stderr, "[ctrl] test_race start\n"); fflush(stderr);
 	ret = test_race(flags);
 	if (ret) {
 		fprintf(stderr, "test_race failed\n");
