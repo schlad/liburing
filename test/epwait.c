@@ -378,7 +378,7 @@ static int test(int flags)
 		close(fds[i][0]);
 		close(fds[i][1]);
 	}
-
+	fprintf(stderr, "[ctrl] race\n"); fflush(stderr);
 	ret = test_race(flags);
 	if (ret) {
 		fprintf(stderr, "test_race failed\n");
