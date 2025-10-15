@@ -248,9 +248,9 @@ static int test_race(int flags)
     struct epoll_event ev;
     struct epoll_event out[NPIPES];
     pthread_t thread;
-    int i, j, efd, ret;
+    int i, efd, ret;
     void *tret;
-    struct __kernel_timespec ts = { .tv_sec = 2, .tv_nsec = 0 }; /* bound waits */
+    struct __kernel_timespec ts = { .tv_sec = 2, .tv_nsec = 0 };
 
     ret = t_create_ring(32, &ring, flags);
     if (ret == T_SETUP_SKIP) {
@@ -263,16 +263,16 @@ static int test_race(int flags)
     for (i = 0; i < NPIPES; i++) {
         if (pipe(d.pipes[i]) < 0) {
             perror("pipe");
+            io_uring_queue_exit(&ring);
             return 1;
         }
-        /* optional: make reads nonblocking so a bad drain can't wedge */
-        int fl = fcntl(d.pipes[i][0], F_GETFL, 0);
-        if (fl >= 0) fcntl(d.pipes[i][0], F_SETFL, fl | O_NONBLOCK);
     }
 
     efd = epoll_create1(0);
     if (efd < 0) {
         perror("epoll_create");
+        for (i = 0; i < NPIPES; i++) { close(d.pipes[i][0]); close(d.pipes[i][1]); }
+        io_uring_queue_exit(&ring);
         return T_EXIT_FAIL;
     }
 
@@ -282,55 +282,72 @@ static int test_race(int flags)
         ret = epoll_ctl(efd, EPOLL_CTL_ADD, d.pipes[i][0], &ev);
         if (ret < 0) {
             perror("epoll_ctl");
+            close(efd);
+            for (i = 0; i < NPIPES; i++) { close(d.pipes[i][0]); close(d.pipes[i][1]); }
+            io_uring_queue_exit(&ring);
             return T_EXIT_FAIL;
         }
     }
 
-    /* Arm the first async epoll wait */
+    /* arm first wait */
     sqe = io_uring_get_sqe(&ring);
     io_uring_prep_epoll_wait(sqe, efd, out, NPIPES, 0);
     io_uring_submit(&ring);
 
     pthread_create(&thread, NULL, thread_fn, &d);
 
-    for (j = 0; j < LOOPS; j++) {
-        /* bounded wait so we can print diagnostics instead of hanging */
+    /* run until producer is done AND epoll has no pending events */
+    for (;;) {
         ret = io_uring_wait_cqe_timeout(&ring, &cqe, &ts);
-        if (ret) {
-            if (ret == -ETIME) {
-                unsigned h = *ring.cq.khead, t = *ring.cq.ktail;
-                struct epoll_event probe[NPIPES];
-                int n = epoll_wait(efd, probe, NPIPES, 0);
-                unsigned long ticks  = atomic_load(&wr_ticks);
-                unsigned long bytes  = atomic_load(&wr_writes);
-                int alive            = atomic_load(&wr_alive);
-                int th_alive         = (pthread_kill(thread, 0) == 0);
+        if (ret == -ETIME) {
+            /* diagnose and decide whether this is a clean end or a bug */
+            struct epoll_event probe[NPIPES];
+            int n = epoll_wait(efd, probe, NPIPES, 0);
+            int alive = atomic_load(&wr_alive);
 
-                fprintf(stderr,
-                    "TIMEOUT: CQ h=%u t=%u, epoll n=%d, writer{alive=%d pthread=%d, ticks=%lu, bytes=%lu}\n",
-                    h, t, n, alive, th_alive, ticks, bytes);
-            } else {
-                fprintf(stderr, "test_race: wait %d\n", ret);
+            if (!alive && n == 0) {
+                /* producer finished and nothing is pending: we're done */
+                break;
             }
+
+            fprintf(stderr, "TIMEOUT: CQ h=%u t=%u, epoll n=%d, writer{alive=%d, ticks=%lu, bytes=%lu}\n",
+                    *ring.cq.khead, *ring.cq.ktail, n, alive,
+                    (unsigned long)atomic_load(&wr_ticks),
+                    (unsigned long)atomic_load(&wr_writes));
+            /* still expecting events but none arrived within 2s → fail */
+            pthread_kill(thread, 0); /* ping for sanity */
+            pthread_join(thread, &tret);
+            for (i = 0; i < NPIPES; i++) { close(d.pipes[i][0]); close(d.pipes[i][1]); }
+            close(efd);
+            io_uring_queue_exit(&ring);
+            return 1;
+        } else if (ret) {
+            fprintf(stderr, "test_race: wait %d\n", ret);
+            pthread_join(thread, &tret);
+            for (i = 0; i < NPIPES; i++) { close(d.pipes[i][0]); close(d.pipes[i][1]); }
+            close(efd);
+            io_uring_queue_exit(&ring);
             return 1;
         }
 
         if (cqe->res < 0) {
             fprintf(stderr, "race res %d\n", cqe->res);
             io_uring_cqe_seen(&ring, cqe);
+            pthread_join(thread, &tret);
+            for (i = 0; i < NPIPES; i++) { close(d.pipes[i][0]); close(d.pipes[i][1]); }
+            close(efd);
+            io_uring_queue_exit(&ring);
             return 1;
         }
 
-        /* Drain exactly what the kernel reported */
+        /* drain exactly the reported events */
         prune(out, cqe->res);
         io_uring_cqe_seen(&ring, cqe);
 
-        /* Immediately re-arm to avoid gaps */
+        /* immediately re-arm the next wait */
         sqe = io_uring_get_sqe(&ring);
         io_uring_prep_epoll_wait(sqe, efd, out, NPIPES, 0);
         io_uring_submit(&ring);
-
-        usleep(100);
     }
 
     pthread_join(thread, &tret);
