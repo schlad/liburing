@@ -233,33 +233,15 @@ static void prune(struct epoll_event *evs, int nr)
 
 static int test_race_epoll_only(void)
 {
-    struct d d;
-    pthread_t thread;
-    struct epoll_event ev, out[NPIPES];
-    int efd = -1, ret = 1;
-
-	printf("Gupi czat");
-
-    for (int i = 0; i < NPIPES; i++) {
-        if (pipe(d.pipes[i]) < 0) { perror("pipe"); return 1; }
-    }
-    efd = epoll_create1(0);
+    fprintf(stderr, "[ctrl] enter\n"); fflush(stderr);
+    ...
     if (efd < 0) { perror("epoll_create1"); goto out; }
-
-    for (int i = 0; i < NPIPES; i++) {
-        ev.events = EPOLLIN;
-        ev.data.fd = d.pipes[i][0];
-        if (epoll_ctl(efd, EPOLL_CTL_ADD, d.pipes[i][0], &ev) < 0) {
-            perror("epoll_ctl"); goto out;
-        }
-    }
-
+    ...
     pthread_create(&thread, NULL, thread_fn, &d);
 
     for (int j = 0; j < LOOPS; j++) {
-        int nr = epoll_wait(efd, out, NPIPES, -1);  // block like the uring test
+        int nr = epoll_wait(efd, out, NPIPES, -1);
         if (nr < 0) { perror("epoll_wait"); goto join_out; }
-        // drain exactly what epoll reported
         for (int i = 0; i < nr; i++) {
             char tmp[32];
             int r = read(out[i].data.fd, tmp, sizeof(tmp));
@@ -267,16 +249,19 @@ static int test_race_epoll_only(void)
         }
     }
     ret = 0;
+    fprintf(stderr, "[ctrl] done OK\n"); fflush(stderr);
 
 join_out:
     pthread_join(thread, NULL);
 out:
+    if (ret) { fprintf(stderr, "[ctrl] exit rc=%d\n", ret); fflush(stderr); }
     if (efd >= 0) close(efd);
     for (int i = 0; i < NPIPES; i++) {
         close(d.pipes[i][0]); close(d.pipes[i][1]);
     }
     return ret;
 }
+
 
 static int test_race(int flags)
 {
