@@ -12,6 +12,12 @@
 #include <pthread.h>
 #include "liburing.h"
 #include "helpers.h"
+#include <stdatomic.h>
+#include <time.h>
+#include <unistd.h>
+
+static _Atomic unsigned long wr_ticks = 0;    /* writer loop iterations */
+static _Atomic unsigned long wr_bytes = 0;    /* total bytes written    */
 
 static int fds[2][2];
 static int no_epoll_wait;
@@ -202,21 +208,19 @@ struct d {
 
 static void *thread_fn(void *data)
 {
-	struct d *d = data;
-	int i, j;
-
-	for (j = 0; j < LOOPS; j++) {
-		usleep(150);
-		for (i = 0; i < NPIPES; i++) {
-			int ret;
-
-			ret = write(d->pipes[i][1], "foo", 3);
-			if (ret < 0)
-				perror("write");
-		}
-	}
-
-	return NULL;
+    struct d *d = data;
+    for (int j = 0; j < LOOPS; j++) {
+        usleep(150);
+        for (int i = 0; i < NPIPES; i++) {
+            int ret = write(d->pipes[i][1], "foo", 3);
+            if (ret < 0)
+                perror("write");
+            else
+                atomic_fetch_add(&wr_bytes, (unsigned long)ret);
+        }
+        atomic_fetch_add(&wr_ticks, 1UL);
+    }
+    return NULL;
 }
 
 static void prune(struct epoll_event *evs, int nr)
@@ -229,6 +233,12 @@ static void prune(struct epoll_event *evs, int nr)
 		if (ret < 0)
 			perror("read");
 	}
+}
+
+static inline long diff_ms(struct timespec a, struct timespec b)
+{
+    return (long)((b.tv_sec - a.tv_sec) * 1000 +
+                  (b.tv_nsec - a.tv_nsec) / 1000000);
 }
 
 static int test_race(int flags)
@@ -298,7 +308,19 @@ static int test_race(int flags)
 	pthread_create(&thread, NULL, thread_fn, &d);
 
 	for (j = 0; j < LOOPS; j++) {
+		/* ---- starvation probe: snapshot BEFORE blocking ---- */
+		unsigned long t0_ticks = atomic_load(&wr_ticks);
+		unsigned long b0       = atomic_load(&wr_bytes);
+		struct timespec ts0, ts1;
+		clock_gettime(CLOCK_MONOTONIC, &ts0);
+
 		ret = io_uring_wait_cqe(&ring, &cqe);
+
+		clock_gettime(CLOCK_MONOTONIC, &ts1);
+		unsigned long t1_ticks = atomic_load(&wr_ticks);
+		unsigned long b1       = atomic_load(&wr_bytes);
+		long waited_ms         = diff_ms(ts0, ts1);
+
 		if (ret) {
 			fprintf(stderr, "wait %d\n", ret);
 			goto fail;
@@ -307,6 +329,18 @@ static int test_race(int flags)
 			fprintf(stderr, "race res %d\n", cqe->res);
 			io_uring_cqe_seen(&ring, cqe);
 			goto fail;
+		}
+
+		/* If we blocked "long enough" and writer didn't advance at all -> starvation */
+		if (waited_ms > 500 && t1_ticks == t0_ticks && b1 == b0) {
+			struct epoll_event probe[NPIPES];
+			int n = epoll_wait(efd, probe, NPIPES, 0); /* was anything readable now? */
+			long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+			fprintf(stderr,
+			        "STARVATION? blocked %ld ms, writer unchanged "
+			        "(ticks=%lu, bytes=%lu), epoll n=%d, CPUs=%ld, flags=0x%x%s\n",
+			        waited_ms, t1_ticks, b1, n, ncpu, flags,
+			        (flags & IORING_SETUP_SQPOLL) ? " (SQPOLL)" : "");
 		}
 
 		/* identify which buffer got filled: 0 or 1 */
