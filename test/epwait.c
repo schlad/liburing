@@ -281,22 +281,27 @@ static int test_race(int flags)
 	pthread_create(&thread, NULL, thread_fn, &d);
 
 	for (j = 0; j < LOOPS; j++) {
-		io_uring_submit_and_wait(&ring, 1);
-
 		ret = io_uring_wait_cqe(&ring, &cqe);
 		if (ret) {
 			fprintf(stderr, "wait %d\n", ret);
-			return 1;
+			goto fail;
 		}
 		if (cqe->res < 0) {
 			fprintf(stderr, "race res %d\n", cqe->res);
-			return 1;
+			io_uring_cqe_seen(&ring, cqe);
+			goto fail;
 		}
+
 		prune(out, cqe->res);
 		io_uring_cqe_seen(&ring, cqe);
+
 		usleep(100);
-		sqe = io_uring_get_sqe(&ring);
-		io_uring_prep_epoll_wait(sqe, efd, out, NPIPES, 0);
+
+		if (j + 1 < LOOPS) {
+			sqe = io_uring_get_sqe(&ring);
+			io_uring_prep_epoll_wait(sqe, efd, out, NPIPES, 0);
+			io_uring_submit(&ring);
+		}
 	}
 
 	pthread_join(thread, &tret);
@@ -308,6 +313,16 @@ static int test_race(int flags)
 	close(efd);
 	io_uring_queue_exit(&ring);
 	return 0;
+
+fail:
+	pthread_join(thread, &tret);
+	for (i = 0; i < NPIPES; i++) {
+		close(d.pipes[i][0]);
+		close(d.pipes[i][1]);
+	}
+	close(efd);
+	io_uring_queue_exit(&ring);
+	return 1;
 }
 
 static int test(int flags)
