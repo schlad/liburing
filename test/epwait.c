@@ -238,6 +238,8 @@ static int test_race_epoll_only(void)
     struct epoll_event ev, out[NPIPES];
     int efd = -1, ret = 1;
 
+	printf("Gupi czat");
+
     for (int i = 0; i < NPIPES; i++) {
         if (pipe(d.pipes[i]) < 0) { perror("pipe"); return 1; }
     }
