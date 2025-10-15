@@ -233,35 +233,80 @@ static void prune(struct epoll_event *evs, int nr)
 
 static int test_race_epoll_only(void)
 {
+    struct d d;
+    pthread_t thread;
+    struct epoll_event ev, out[NPIPES];
+    int efd = -1, ret = 1;
+    size_t total_drained = 0;
+
     fprintf(stderr, "[ctrl] enter\n"); fflush(stderr);
-    ...
-    if (efd < 0) { perror("epoll_create1"); goto out; }
-    ...
-    pthread_create(&thread, NULL, thread_fn, &d);
+
+    for (int i = 0; i < NPIPES; i++) {
+        if (pipe(d.pipes[i]) < 0) {
+            perror("[ctrl] pipe");
+            return 1;
+        }
+    }
+
+    efd = epoll_create1(0);
+    if (efd < 0) {
+        perror("[ctrl] epoll_create1");
+        goto out;
+    }
+
+    for (int i = 0; i < NPIPES; i++) {
+        ev.events = EPOLLIN;
+        ev.data.fd = d.pipes[i][0];
+        if (epoll_ctl(efd, EPOLL_CTL_ADD, d.pipes[i][0], &ev) < 0) {
+            perror("[ctrl] epoll_ctl");
+            goto out;
+        }
+    }
+
+    if (pthread_create(&thread, NULL, thread_fn, &d) != 0) {
+        perror("[ctrl] pthread_create");
+        goto out;
+    }
 
     for (int j = 0; j < LOOPS; j++) {
-        int nr = epoll_wait(efd, out, NPIPES, -1);
-        if (nr < 0) { perror("epoll_wait"); goto join_out; }
+        fprintf(stderr, "[ctrl] loop=%d waiting...\n", j);
+        fflush(stderr);
+
+        int nr = epoll_wait(efd, out, NPIPES, -1);  /* block like the uring test */
+        if (nr < 0) {
+            perror("[ctrl] epoll_wait");
+            goto join_out;
+        }
+
+        fprintf(stderr, "[ctrl] loop=%d epoll returned nr=%d\n", j, nr);
+        fflush(stderr);
+
+        /* drain exactly what epoll reported */
         for (int i = 0; i < nr; i++) {
             char tmp[32];
             int r = read(out[i].data.fd, tmp, sizeof(tmp));
-            if (r < 0) perror("read");
+            if (r < 0)
+                perror("[ctrl] read");
         }
+        total_drained += (size_t)nr;
     }
+
     ret = 0;
-    fprintf(stderr, "[ctrl] done OK\n"); fflush(stderr);
+    fprintf(stderr, "[ctrl] done OK (total_drained=%zu)\n", total_drained);
+    fflush(stderr);
 
 join_out:
     pthread_join(thread, NULL);
 out:
-    if (ret) { fprintf(stderr, "[ctrl] exit rc=%d\n", ret); fflush(stderr); }
+    if (ret)
+        fprintf(stderr, "[ctrl] exit rc=%d (total_drained=%zu)\n", ret, total_drained), fflush(stderr);
     if (efd >= 0) close(efd);
     for (int i = 0; i < NPIPES; i++) {
-        close(d.pipes[i][0]); close(d.pipes[i][1]);
+        close(d.pipes[i][0]);
+        close(d.pipes[i][1]);
     }
     return ret;
 }
-
 
 static int test_race(int flags)
 {
