@@ -242,6 +242,7 @@ static int test_race(int flags)
 	pthread_t thread;
 	int i, j, efd, ret;
 	void *tret;
+	size_t total_drained = 0; /* instrumentation */
 
 	ret = t_create_ring(32, &ring, flags);
 	if (ret == T_SETUP_SKIP) {
@@ -281,6 +282,10 @@ static int test_race(int flags)
 	pthread_create(&thread, NULL, thread_fn, &d);
 
 	for (j = 0; j < LOOPS; j++) {
+		/* instrumentation: show where a stall can occur */
+		printf("race[%d]: submitting/awaiting next CQE (total_drained=%zu)\n", j, total_drained);
+		fflush(stdout);
+
 		io_uring_submit_and_wait(&ring, 1);
 
 		ret = io_uring_wait_cqe(&ring, &cqe);
@@ -292,9 +297,18 @@ static int test_race(int flags)
 			fprintf(stderr, "race res %d\n", cqe->res);
 			return 1;
 		}
+
+		/* instrumentation: how many events we got this iteration */
+		printf("race[%d]: cqe->res=%d (before drain; total_drained=%zu)\n", j, cqe->res, total_drained);
+		fflush(stdout);
+
 		prune(out, cqe->res);
+
+		total_drained += cqe->res; /* instrumentation: running sum */
 		io_uring_cqe_seen(&ring, cqe);
+
 		usleep(100);
+
 		sqe = io_uring_get_sqe(&ring);
 		io_uring_prep_epoll_wait(sqe, efd, out, NPIPES, 0);
 	}
