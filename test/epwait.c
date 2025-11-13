@@ -221,7 +221,7 @@ static void *thread_fn(void *data)
 
 static void prune(struct epoll_event *evs, int nr)
 {
-	char tmp[32];
+	char tmp[3];
 	int i, ret;
 
 	for (i = 0; i < nr; i++) {
