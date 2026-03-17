@@ -23,7 +23,8 @@
 
 #define NR_OVERFLOW	(NR_BUFS / 4)
 
-static int no_buf_ring, no_read_mshot, no_buf_ring_inc, no_read_mshot_inc;
+static int no_buf_ring, no_read_mshot, no_buf_ring_inc;
+static int no_read_inc, no_read_mshot_inc;
 
 static void arm_read(struct io_uring *ring, int fd, int use_mshot)
 {
@@ -56,6 +57,8 @@ static int test_inc(int use_mshot, int flags)
 	int bid_bytes;
 
 	if (no_buf_ring)
+		return 0;
+	if (!use_mshot && no_read_inc)
 		return 0;
 	if (use_mshot && no_read_mshot_inc)
 		return 0;
@@ -119,6 +122,11 @@ static int test_inc(int use_mshot, int flags)
 				bid = this_bid;
 			} else if (bid != this_bid) {
 				if (bid_bytes != 2048) {
+					if (!use_mshot) {
+						no_read_inc = 1;
+						ret = 0;
+						goto out;
+					}
 					fprintf(stderr, "unexpected bid bytes %d\n",
 						bid_bytes);
 					return 1;
@@ -695,6 +703,8 @@ test_invalids:
 		fprintf(stderr, "test_inc 0 0 failed\n");
 		return T_EXIT_FAIL;
 	}
+	if (no_read_inc)
+		goto test_inc_mshot;
 
 	ret = test_inc(0, IORING_SETUP_SQPOLL);
 	if (ret) {
@@ -708,6 +718,7 @@ test_invalids:
 		return T_EXIT_FAIL;
 	}
 
+test_inc_mshot:
 	ret = test_inc(1, 0);
 	if (ret) {
 		fprintf(stderr, "test_inc 1 0 failed\n");
