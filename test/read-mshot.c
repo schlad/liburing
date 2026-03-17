@@ -274,6 +274,8 @@ static int test(int first_good, int async, int overflow, int incremental)
 	char tmp[32];
 	void *ptr[NR_BUFS];
 	char *inc_index;
+	char *expected;
+	size_t expected_bytes = 0, seen_bytes = 0;
 
 	p.flags = IORING_SETUP_CQSIZE;
 	if (!overflow)
@@ -320,17 +322,29 @@ static int test(int first_good, int async, int overflow, int incremental)
 			io_uring_buf_ring_add(br, ptr[i], size, i + 1, BR_MASK, i);
 		}
 		inc_index = NULL;
+		expected = NULL;
 		io_uring_buf_ring_advance(br, NR_BUFS);
 	} else {
 		inc_index = ptr[0] = malloc(NR_BUFS * BUF_SIZE);
+		expected = malloc(NR_BUFS * BUF_SIZE);
+		if (!ptr[0] || !expected)
+			return 1;
 		memset(inc_index, 0, NR_BUFS * BUF_SIZE);
+		memset(expected, 0, NR_BUFS * BUF_SIZE);
 		io_uring_buf_ring_add(br, ptr[0], NR_BUFS * BUF_SIZE, 1, BR_MASK, 0);
 		io_uring_buf_ring_advance(br, 1);
 	}
 
 	if (first_good) {
+		size_t this_len;
+
 		sprintf(tmp, "this is buffer %d\n", start_msg++);
-		ret = write(fds[1], tmp, strlen(tmp));
+		this_len = strlen(tmp);
+		if (incremental) {
+			memcpy(expected + expected_bytes, tmp, this_len);
+			expected_bytes += this_len;
+		}
+		ret = write(fds[1], tmp, this_len);
 	}
 
 	sqe = io_uring_get_sqe(&ring);
@@ -347,11 +361,18 @@ static int test(int first_good, int async, int overflow, int incremental)
 
 	/* write NR_BUFS + 1, or if first_good is set, NR_BUFS */
 	for (i = 0; i < NR_BUFS + !first_good; i++) {
+		size_t this_len;
+
 		/* prevent pipe buffer merging */
 		usleep(1000);
 		sprintf(tmp, "this is buffer %d\n", i + start_msg);
-		ret = write(fds[1], tmp, strlen(tmp));
-		if (ret != strlen(tmp)) {
+		this_len = strlen(tmp);
+		if (incremental) {
+			memcpy(expected + expected_bytes, tmp, this_len);
+			expected_bytes += this_len;
+		}
+		ret = write(fds[1], tmp, this_len);
+		if (ret != this_len) {
 			fprintf(stderr, "write ret %d\n", ret);
 			return 1;
 		}
@@ -367,11 +388,20 @@ static int test(int first_good, int async, int overflow, int incremental)
 		}
 		if (cqe->res < 0) {
 			/* expected failure as we try to read one too many */
-			if (cqe->res == -ENOBUFS && i == NR_BUFS)
+			if (!incremental && cqe->res == -ENOBUFS && i == NR_BUFS)
+				break;
+			if (incremental && overflow && cqe->res == -ENOBUFS &&
+			    i >= NR_OVERFLOW)
 				break;
 			if (!i && cqe->res == -EINVAL) {
 				no_read_mshot = 1;
 				break;
+			}
+			if (incremental) {
+				fprintf(stderr,
+					"%d: cqe res %d after %zu/%zu bytes\n",
+					i, cqe->res, seen_bytes, expected_bytes);
+				return 1;
 			}
 			fprintf(stderr, "%d: cqe res %d\n", i, cqe->res);
 			return 1;
@@ -389,11 +419,18 @@ static int test(int first_good, int async, int overflow, int incremental)
 			fprintf(stderr, "bid %d for incremental\n", bid);
 			return 1;
 		}
-		if (incremental && !first_good) {
-			char out_buf[64];
-			sprintf(out_buf, "this is buffer %d\n", i + start_msg);
-			if (strncmp(inc_index, out_buf, strlen(out_buf)))
+		if (incremental) {
+			if (seen_bytes + cqe->res > expected_bytes) {
+				fprintf(stderr, "unexpected read size %d at %zu/%zu\n",
+					cqe->res, seen_bytes, expected_bytes);
 				return 1;
+			}
+			if (memcmp(inc_index, expected + seen_bytes, cqe->res)) {
+				fprintf(stderr, "incremental data mismatch at %zu\n",
+					seen_bytes);
+				return 1;
+			}
+			seen_bytes += cqe->res;
 			inc_index += cqe->res;
 		}
 		if (!(cqe->flags & IORING_CQE_F_MORE)) {
@@ -409,12 +446,26 @@ static int test(int first_good, int async, int overflow, int incremental)
 			return 1;
 		}
 		io_uring_cqe_seen(&ring, cqe);
+		if (incremental) {
+			if (overflow && seen_bytes == expected_bytes) {
+				fprintf(stderr, "Expected overflow!\n");
+				return 1;
+			}
+			if (!overflow && seen_bytes == expected_bytes)
+				break;
+		}
 	}
 
+	if (incremental && seen_bytes != expected_bytes) {
+		fprintf(stderr, "short incremental read %zu/%zu\n",
+			seen_bytes, expected_bytes);
+		return 1;
+	}
 
 	io_uring_free_buf_ring(&ring, br, NR_BUFS, BUF_BGID);
 	io_uring_queue_exit(&ring);
 	if (incremental) {
+		free(expected);
 		free(ptr[0]);
 	} else {
 		for (i = 0; i < NR_BUFS; i++)
