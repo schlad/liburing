@@ -25,6 +25,17 @@
 
 static int no_buf_ring, no_read_mshot, no_buf_ring_inc;
 
+static void dump_cqe(const char *tag, int iter, struct io_uring_cqe *cqe,
+		     int bid, int bid_bytes, int nbytes)
+{
+	fprintf(stderr,
+		"%s[%d]: res=%d flags=0x%x bid=%d more=%d buf_more=%d bid_bytes=%d nbytes=%d\n",
+		tag, iter, cqe->res, cqe->flags, bid,
+		!!(cqe->flags & IORING_CQE_F_MORE),
+		!!(cqe->flags & IORING_CQE_F_BUF_MORE),
+		bid_bytes, nbytes);
+}
+
 static void arm_read(struct io_uring *ring, int fd, int use_mshot)
 {
 	struct io_uring_sqe *sqe;
@@ -38,6 +49,7 @@ static void arm_read(struct io_uring *ring, int fd, int use_mshot)
 		sqe->buf_group = BUF_BGID;
 	}
 
+	fprintf(stderr, "arm_read: use_mshot=%d fd=%d\n", use_mshot, fd);
 	io_uring_submit(ring);
 }
 
@@ -107,6 +119,8 @@ static int test_inc(int use_mshot, int flags)
 		ret = io_uring_peek_cqe(&ring, &cqe);
 		if (!ret) {
 			int this_bid = cqe->flags >> IORING_CQE_BUFFER_SHIFT;
+
+			dump_cqe("test_inc cqe", i, cqe, this_bid, bid_bytes, nbytes);
 			if (bid == -1) {
 				bid = this_bid;
 			} else if (bid != this_bid) {
@@ -365,6 +379,10 @@ static int test(int first_good, int async, int overflow, int incremental)
 			fprintf(stderr, "wait cqe failed %d\n", ret);
 			return 1;
 		}
+		bid = cqe->flags >> IORING_CQE_BUFFER_SHIFT;
+		if (incremental) {
+			dump_cqe("test incremental cqe", i, cqe, bid, -1, -1);
+		}
 		if (cqe->res < 0) {
 			/* expected failure as we try to read one too many */
 			if (cqe->res == -ENOBUFS && i == NR_BUFS)
@@ -384,7 +402,6 @@ static int test(int first_good, int async, int overflow, int incremental)
 			fprintf(stderr, "no buffer selected\n");
 			return 1;
 		}
-		bid = cqe->flags >> IORING_CQE_BUFFER_SHIFT;
 		if (incremental && bid != 1) {
 			fprintf(stderr, "bid %d for incremental\n", bid);
 			return 1;
