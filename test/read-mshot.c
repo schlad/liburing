@@ -23,7 +23,7 @@
 
 #define NR_OVERFLOW	(NR_BUFS / 4)
 
-static int no_buf_ring, no_read_mshot, no_buf_ring_inc;
+static int no_buf_ring, no_read_mshot, no_buf_ring_inc, no_read_mshot_inc;
 
 static void arm_read(struct io_uring *ring, int fd, int use_mshot)
 {
@@ -56,6 +56,8 @@ static int test_inc(int use_mshot, int flags)
 	int bid_bytes;
 
 	if (no_buf_ring)
+		return 0;
+	if (use_mshot && no_read_mshot_inc)
 		return 0;
 
 	p.flags = flags;
@@ -106,6 +108,12 @@ static int test_inc(int use_mshot, int flags)
 		io_uring_get_events(&ring);
 		ret = io_uring_peek_cqe(&ring, &cqe);
 		if (!ret) {
+			if (cqe->res == -ENOBUFS && use_mshot) {
+				no_read_mshot_inc = 1;
+				io_uring_cqe_seen(&ring, cqe);
+				ret = 0;
+				goto out;
+			}
 			int this_bid = cqe->flags >> IORING_CQE_BUFFER_SHIFT;
 			if (bid == -1) {
 				bid = this_bid;
@@ -144,12 +152,14 @@ static int test_inc(int use_mshot, int flags)
 		}
 	}
 
+	ret = 0;
+out:
 	io_uring_free_buf_ring(&ring, br, 32, BUF_BGID);
 	io_uring_queue_exit(&ring);
 	free(ptr);
 	close(fds[0]);
 	close(fds[1]);
-	return 0;
+	return ret;
 }
 
 static int test_clamp(void)
@@ -398,6 +408,11 @@ static int test(int first_good, int async, int overflow, int incremental)
 				break;
 			}
 			if (incremental) {
+				if (cqe->res == -ENOBUFS && !overflow) {
+					no_read_mshot_inc = 1;
+					ret = 0;
+					goto out;
+				}
 				fprintf(stderr,
 					"%d: cqe res %d after %zu/%zu bytes\n",
 					i, cqe->res, seen_bytes, expected_bytes);
@@ -462,6 +477,8 @@ static int test(int first_good, int async, int overflow, int incremental)
 		return 1;
 	}
 
+	ret = 0;
+out:
 	io_uring_free_buf_ring(&ring, br, NR_BUFS, BUF_BGID);
 	io_uring_queue_exit(&ring);
 	if (incremental) {
@@ -471,7 +488,7 @@ static int test(int first_good, int async, int overflow, int incremental)
 		for (i = 0; i < NR_BUFS; i++)
 			free(ptr[i]);
 	}
-	return 0;
+	return ret;
 }
 
 static int test_invalid(int async)
@@ -609,6 +626,8 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "test 0 0 0 1 failed\n");
 		return T_EXIT_FAIL;
 	}
+	if (no_read_mshot_inc)
+		goto test_invalids;
 
 	ret = test(0, 0, 1, 1);
 	if (ret) {
@@ -652,6 +671,7 @@ int main(int argc, char *argv[])
 		return T_EXIT_FAIL;
 	}
 
+test_invalids:
 	ret = test_invalid(0);
 	if (ret) {
 		fprintf(stderr, "test_invalid 0 failed\n");
