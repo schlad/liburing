@@ -36,6 +36,15 @@ static void dump_cqe(const char *tag, int iter, struct io_uring_cqe *cqe,
 		bid_bytes, nbytes);
 }
 
+static void dump_incremental_progress(int iter, struct io_uring_cqe *cqe,
+				      int bid, int msg_idx, size_t consumed)
+{
+	fprintf(stderr,
+		"test incremental progress[%d]: expected_msg=%d consumed=%zu next=%zu res=%d bid=%d flags=0x%x\n",
+		iter, msg_idx, consumed, consumed + (cqe->res > 0 ? cqe->res : 0),
+		cqe->res, bid, cqe->flags);
+}
+
 static void arm_read(struct io_uring *ring, int fd, int use_mshot)
 {
 	struct io_uring_sqe *sqe;
@@ -285,6 +294,7 @@ static int test(int first_good, int async, int overflow, int incremental)
 	struct io_uring ring;
 	int ret, fds[2], i, start_msg = 0;
 	int br_flags = 0;
+	int msg_idx = 0;
 	char tmp[32];
 	void *ptr[NR_BUFS];
 	char *inc_index;
@@ -382,6 +392,8 @@ static int test(int first_good, int async, int overflow, int incremental)
 		bid = cqe->flags >> IORING_CQE_BUFFER_SHIFT;
 		if (incremental) {
 			dump_cqe("test incremental cqe", i, cqe, bid, -1, -1);
+			dump_incremental_progress(i, cqe, bid, msg_idx,
+						 inc_index - (char *) ptr[0]);
 		}
 		if (cqe->res < 0) {
 			/* expected failure as we try to read one too many */
@@ -412,6 +424,7 @@ static int test(int first_good, int async, int overflow, int incremental)
 			if (strncmp(inc_index, out_buf, strlen(out_buf)))
 				return 1;
 			inc_index += cqe->res;
+			msg_idx++;
 		}
 		if (!(cqe->flags & IORING_CQE_F_MORE)) {
 			/* we expect this on overflow */
