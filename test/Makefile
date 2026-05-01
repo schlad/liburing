@@ -223,6 +223,7 @@ test_srcs := \
 	recv-mshot-drain.c \
 	recv-mshot-fair.c \
 	recv-multishot.c \
+	recvmsg-inc-tail.c \
 	reg-fd-only.c \
 	reg-hint.c \
 	reg-reg-ring.c \
