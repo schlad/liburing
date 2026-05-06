@@ -286,6 +286,7 @@ test_srcs := \
 	task-restrict.c \
 	teardowns.c \
 	thread-exit.c \
+	timens-abs-timer.c \
 	timerfd-short-read.c \
 	timeout.c \
 	timeout-new.c \
