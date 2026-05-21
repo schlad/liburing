@@ -22,14 +22,22 @@ struct data {
 	int nr_fds;
 };
 
-static int time_pass(struct timeval *start, unsigned long min_t,
-		     unsigned long max_t, const char *name)
+static const char *ring_name(struct io_uring *ring)
+{
+	if (ring->flags & IORING_SETUP_DEFER_TASKRUN)
+		return "ring2/defer_taskrun";
+	return "ring1/default";
+}
+
+static int time_pass(struct io_uring *ring, struct timeval *start,
+		     unsigned long min_t, unsigned long max_t,
+		     const char *name)
 {
 	unsigned long elapsed;
 
 	elapsed = mtime_since_now(start);
 	if (elapsed < min_t || elapsed > max_t) {
-		fprintf(stderr, "%s fails time check\n", name);
+		fprintf(stderr, "%s/%s fails time check\n", ring_name(ring), name);
 		fprintf(stderr, " elapsed=%lu, min=%lu, max=%lu\n", elapsed,
 				min_t, max_t);
 		return T_EXIT_FAIL;
@@ -103,11 +111,11 @@ static int __test_writes(struct io_uring *ring, int npipes, int usec_sleep,
 	gettimeofday(&tv, NULL);
 	ret = io_uring_wait_cqes_min_timeout(ring, &cqe, 4, &ts, usec_wait, NULL);
 	if (ret) {
-		fprintf(stderr, "wait_cqes: %d\n", ret);
+		fprintf(stderr, "%s/%s wait_cqes: %d\n", ring_name(ring), name, ret);
 		return T_EXIT_FAIL;
 	}
 
-	ret = time_pass(&tv, min_t, max_t, name);
+	ret = time_pass(ring, &tv, min_t, max_t, name);
 
 	io_uring_cq_advance(ring, npipes);
 
@@ -174,17 +182,19 @@ static int __test_nop(struct io_uring *ring, int nr_nops, int min_t, int max_t,
 	io_uring_cq_advance(ring, nr_nops);
 	if (nr_nops) {
 		if (ret) {
-			fprintf(stderr, "wait_cqes: %d\n", ret);
+			fprintf(stderr, "%s/%s wait_cqes: %d\n", ring_name(ring),
+					name, ret);
 			return T_EXIT_FAIL;
 		}
 	} else {
 		if (ret != -ETIME) {
-			fprintf(stderr, "wait_cqes: %d\n", ret);
+			fprintf(stderr, "%s/%s wait_cqes: %d\n", ring_name(ring),
+					name, ret);
 			return T_EXIT_FAIL;
 		}
 	}
 
-	return time_pass(&tv, min_t, max_t, name);
+	return time_pass(ring, &tv, min_t, max_t, name);
 }
 
 /*
